@@ -11,6 +11,8 @@ export interface StubSpec {
   blurb: string;
   status: string;
   build: string[];
+  /** Optional forward link, so the flow can reach the built phase. */
+  next?: { scene: string; label: string };
 }
 
 /**
@@ -96,10 +98,28 @@ export class PhaseStub extends Phaser.Scene {
 
     content.add([eyebrow, title, blurb, rule, statusLabel, ...rows.flat(), foot]);
 
+    const rowY = cy + cardH - 58;
+    const right = cx + cardW - pad;
+
+    const next = this.spec.next;
+    if (next) {
+      new Button(this, {
+        x: right - 208,
+        y: rowY,
+        w: 208,
+        h: 38,
+        label: next.label,
+        onClick: () => {
+          sfx.click();
+          this.scene.start(next.scene);
+        },
+      });
+    }
+
     new Button(this, {
-      x: cx + cardW - pad - 132,
-      y: cy + cardH - 58,
-      w: 132,
+      x: right - (next ? 208 + 12 + 156 : 132),
+      y: rowY,
+      w: next ? 156 : 132,
       h: 38,
       label: 'Back to title',
       variant: 'ghost',
@@ -109,6 +129,13 @@ export class PhaseStub extends Phaser.Scene {
       },
     });
 
+    const advance = (): void => {
+      if (!next) return;
+      sfx.click();
+      this.scene.start(next.scene);
+    };
+    this.input.keyboard?.on('keydown-ENTER', advance);
+    this.input.keyboard?.on('keydown-SPACE', advance);
     this.input.keyboard?.on('keydown-ESC', () => this.scene.start('Title'));
     this.input.keyboard?.on('keydown-M', () => sfx.toggleMute());
 

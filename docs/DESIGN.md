@@ -1,47 +1,48 @@
 # Roast & Ruin — design notes
 
-Working document for the loop, the numbers, and the build order. Everything here
-is a first pass and is cheap to change; the stubs exist so the shape can be
-critiqued before it is built.
+Working document for the loop, the numbers, and the build order. The day, dusk
+and dawn sections below are **specs for later work** — those scenes are stubs.
+The night section describes what is actually playable today. Everything here is
+a first pass and cheap to change.
 
 ## The pitch
 
-You inherited a café with a cellar that should not be there. By day you serve the
-neighbourhood; by night you go down for the beans. Reputation is the shop's memory
-of you, and the pantry is the only thing standing between the menu and a very
-long morning.
+You inherited a café with a wood behind it that should not be there. By day you
+serve the neighbourhood; by night you take a lantern out among the trees for the
+beans and berries you cannot buy. Reputation is the shop's memory of you, and the
+pantry is the only thing standing between the menu and a very long morning.
 
 **Pillars**
 
-1. **Two shifts, one economy.** Shop coins buy dungeon survival; dungeon loot
-   unlocks shop income. Neither half is optional.
+1. **Two shifts, one economy.** Shop coins buy woods survival; woods loot unlocks
+   shop income. Neither half is optional.
 2. **Skill in the pour, nerve in the dark.** The day is a timing game, the night is
    a movement game. Both are playable with one hand on the keyboard.
-3. **A short cycle.** One full day + delve is meant to take about two minutes, so a
-   run is a stack of small, legible decisions.
+3. **A short cycle.** One full day + forage is meant to take about two minutes, so
+   a run is a stack of small, legible decisions.
 
 ## The cycle
 
 ```
         ┌──────────────── DAY 07:00–19:00 ────────────────┐
-        │  customers → pour → serve → coins + reputation  │
+        │  customers → pour → serve → coins + reputation  │   STUB
         └───────────────────────┬─────────────────────────┘
                                 │
-                       DUSK (ledger + upgrades)
+                       DUSK (ledger + upgrades)               STUB
                                 │
         ┌──────────────── NIGHT 19:00–late ───────────────┐
-        │  cellar floors → fight → ingredients → stairs   │
+        │  trails → fight → forage → trailhead → home     │   PLAYABLE
         └───────────────────────┬─────────────────────────┘
                                 │
-                      DAWN (results + restock)
+                      DAWN (results + restock)                 STUB
                                 │
                                 └──────► next day
 ```
 
-Death is not a reset: you wake on the prep bench, lose half the haul and some
+Death is not a reset: you wake at the trailhead, lose half the satchel and some
 reputation, and the day still advances.
 
-## Day shift
+## Day shift — stub, spec for later
 
 - **Customers**: `5 + min(3, floor((day-1)/2))` per shift. Three bar slots.
 - **Arrival**: first customer immediately, then one every 1.6–2.6s while slots are
@@ -78,15 +79,15 @@ reputation, and the day still advances.
 | Single Shot | 9 | 0 | 1 bean | 1150ms | 16% |
 | Cortado | 15 | 8 | 1 bean + 1 milk | 1050ms | 15% |
 | Flat White | 19 | 18 | 1 bean + 1 milk | 960ms | 14% |
-| Cellar Cold Brew | 27 | 28 | 2 beans | 1000ms | 12% |
+| Nightjar Cold Brew | 27 | 28 | 2 beans | 1000ms | 12% |
 | Mushroom Mocha | 38 | 44 | 1 bean + 1 milk + 1 mushroom | 840ms | 11% |
 | Ember Flat White | 55 | 62 | 2 beans + 1 milk + 1 ember | 760ms | 10% |
 | Void Espresso | 88 | 80 | 1 bean + 1 void bean | 660ms | 9% |
 
 Starting pantry: 14 beans, 6 milk. That is about one day of single shots and
-cortados, which forces the first delve.
+cortados, which forces the first forage.
 
-### Upgrades (bought at dusk)
+### Upgrades (bought at dusk, later)
 
 | upgrade | max | base cost | effect |
 |---|---:|---:|---|
@@ -98,46 +99,66 @@ cortados, which forces the first delve.
 | Deep satchel | 3 | 50 | +15% chance of extra loot per level |
 
 Cost scales ×1.75 per level. A good day one pays for roughly one level of one
-upgrade; the delve is what makes the second upgrade possible.
+upgrade; the woods are what makes the second upgrade possible.
 
-## Night shift
+## Night shift — playable now
 
-- **Depths**: Cellar (2 floors, day 1), Undercroft (3, day 3), Deep Grind (4, day 6).
-- **Generation**: 9–12 non-overlapping rectangular rooms joined by L corridors on a
-  44×34 tile grid (40px tiles). The last room holds the stairs; the first room is
-  the entry. Nothing is guaranteed to be adjacent.
-- **Light**: a screen-space vignette plus a warm glow that follows the player.
-  Enemy visibility falls off with distance, so the room you are in is the room you
-  can fight in.
-- **Candle**: 75s per floor. When it dies, the dark bites: 1 damage every 5s and
-  half loot. The candle is the pacing device, not a fail state.
-- **Combat**: Space strikes in the facing direction (steam-wand cone, 380ms
-  cooldown). Contact damage with i-frames and knockback.
-- **Enemies**: caffeine slime (chases, hops), cellar moth (fast, erratic), house
-  blend guardian on the final floor (big slime, splits at half health).
-- **Loot**: ingredient nodes and coin piles in rooms, auto-picked on touch. Weighted
-  by depth — void beans only start showing up meaningfully at depth 2+.
-- **Exit**: stairs on the final floor return you to the shop. Each floor's stairs
-  descend one level, keeping health and haul.
+The woods are one continuous screen-sized slice of a larger world, not a set of
+floors. The map is laid out fresh each run.
 
-## Dawn
+- **World**: 48×36 tiles of 40px (1920×1440). Five or six circular clearings are
+  joined by wandering, two-tile-wide trails. Tree stands block movement; ferns,
+  bushes and stumps decorate the walkable ground. The camera follows the player.
+- **Pathing**: a flood fill from the start checks that the clearings are reachable;
+  the layout is regenerated if it is too small.
+- **Player**: 3 hearts (+1 per iron charm), speed 238px/s, knockback and 1.2s of
+  invulnerability when hit. Space/click swings a 96px cone on a 360ms cooldown.
+- **Forage**: 13 nodes — 4 Wild bean, 3 Moonmilk, 3 Glowcap, 2 Emberberry, 1 Void
+  bean — spread across the clearings. Touching one adds it to the satchel and
+  saves it only when you get home.
+- **Enemies**: 13 total — forest slimes (2hp, hop toward you), moths (1hp, erratic
+  flight) and one elder slime (8hp) in the farthest clearing. Creatures only
+  notice the lantern within 270px (340px for the elder); beyond that they wander.
+  Contact costs one heart.
+- **Loot**: 22% of slimes drop an extra ingredient, elders drop three; kills have
+  a 34% coin chance (12 coins for an elder).
+- **Exit**: the trailhead lantern at the start. Stand near it and press E to end
+  the run. The summary banks the satchel and coins into the save, adds lifetime
+  kills, and offers *Forage again* or *Back to title*.
+- **Death**: you wake on the path with half the satchel rounded down; the other
+  half is listed as lost on the summary screen. Progress never resets.
 
-Results screen: depth reached, ingredients, coins, kills, whether you died. Loot is
-added to the pantry, coins to the till, day advances, save.
+### Ideas not built yet
+
+- Depth tiers — Bean Groves, Glowcap Rings, Deep Grove — with richer loot tables.
+- A candle/lantern timer as a pacing device: when it gutters, damage and loot loss
+  start ticking.
+- A splits-at-half-health guardian for the deepest trail.
+- Route choices at dusk, and reputation penalties for dying.
+
+## Dawn — stub
+
+Planned results screen: trail reached, ingredients, coins, kills, whether you
+died. Loot is added to the pantry, coins to the till, day advances, save. The
+woods summary already performs the pantry/coins part.
 
 ## Dead ends and guardrails
 
-- If the pantry cannot make anything, the day ends early with a "sold out" line and
-  the dungeon becomes the only way forward. There is always at least one delve.
+- If the pantry cannot make anything, the day ends early with a "sold out" line
+  and the woods become the only way forward. There is always a trail to walk.
 - The customer order pool is filtered by what is makeable *now*, so a shift never
   starts impossible.
 - A run never resets progress on death; only an explicit "new run" wipes the save.
+- The woods are never unwinnable: there is always a trailhead, and reaching it is
+  a successful run even with an empty satchel.
 
-## Implemented in this scaffold
+## Implemented
 
 - Palette, type pairing, procedural texture library, WebAudio SFX
-- Title screen with the shop/cellar double-exposure and save-aware menu
-- Scene graph and transition keys for all four phases (stubs)
+- Title screen with the shop/dark double-exposure, save-aware menu and a direct
+  woods shortcut
+- Scene graph and transitions: title → shop (stub) → dusk (stub) → woods → title
+- Playable woods: generation, movement, combat, foraging, pause, summary, save
 - Meta save/load with pantry, upgrades, lifetime stats
 - Economy tables, drink/upgrade effects, loot tables, day pacing
 - Build, typecheck, Pages workflow
@@ -149,4 +170,4 @@ added to the pantry, coins to the till, day advances, save.
 - Is death supposed to cost reputation, coins, or just the haul?
 - Do we want a persistent "regulars" cast with names and preferred orders, or
   anonymous customers?
-- Touch controls for mobile: tap-to-move along the bar + tap-to-stop is the plan.
+- Touch controls for mobile: virtual stick for the woods, tap-to-stop for the bar.

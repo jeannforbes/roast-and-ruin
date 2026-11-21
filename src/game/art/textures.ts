@@ -548,27 +548,33 @@ const drawStairs = (g: Phaser.GameObjects.Graphics): void => {
 /* Enemies                                                             */
 /* ------------------------------------------------------------------ */
 
-const drawSlime = (g: Phaser.GameObjects.Graphics): void => {
-  shadow(g, 22, 32, 34, 6);
-  g.fillStyle(C.roast, 1);
-  g.fillEllipse(22, 24, 38, 18);
-  g.fillCircle(22, 18, 14);
-  g.lineStyle(2.5, INK, 1);
-  g.strokeEllipse(22, 24, 38, 18);
-  g.lineStyle(1.5, INK, 0.8);
+const drawSlime = (
+  g: Phaser.GameObjects.Graphics,
+  body: number,
+  accent: number,
+  k = 1,
+): void => {
+  const s = (v: number): number => v * k;
+  shadow(g, s(22), s(32), s(34), s(6));
+  g.fillStyle(body, 1);
+  g.fillEllipse(s(22), s(24), s(38), s(18));
+  g.fillCircle(s(22), s(18), s(14));
+  g.lineStyle(2.5 * k, INK, 1);
+  g.strokeEllipse(s(22), s(24), s(38), s(18));
+  g.lineStyle(1.5 * k, INK, 0.8);
   g.beginPath();
-  g.moveTo(12, 12);
-  g.lineTo(32, 26);
+  g.moveTo(s(12), s(12));
+  g.lineTo(s(32), s(26));
   g.strokePath();
   // shine
-  g.fillStyle(C.crema, 0.35);
-  g.fillEllipse(15, 12, 8, 5);
+  g.fillStyle(C.crema, 0.32);
+  g.fillEllipse(s(15), s(12), s(8), s(5));
   // eyes
-  g.fillStyle(INK, 1);
-  g.fillCircle(17, 20, 2);
-  g.fillCircle(27, 20, 2);
-  g.lineStyle(1.5, INK, 1);
-  g.lineBetween(19, 27, 25, 27);
+  g.fillStyle(accent, 1);
+  g.fillCircle(s(17), s(20), s(2.2));
+  g.fillCircle(s(27), s(20), s(2.2));
+  g.lineStyle(1.5 * k, INK, 1);
+  g.lineBetween(s(19), s(27), s(25), s(27));
 };
 
 const drawMoth = (g: Phaser.GameObjects.Graphics): void => {
@@ -693,7 +699,386 @@ const drawWallTile = (g: Phaser.GameObjects.Graphics): void => {
 };
 
 /* ------------------------------------------------------------------ */
-/* Atmosphere                                                          */
+/* The woods                                                           */
+/* ------------------------------------------------------------------ */
+
+const drawGrassTile = (g: Phaser.GameObjects.Graphics, variant: number): void => {
+  const rnd = mulberry32(700 + variant * 53);
+  const base = [0x2b4030, 0x293d2c, 0x2f4533, 0x263a2a][variant]!;
+  g.fillStyle(base, 1);
+  g.fillRect(0, 0, 40, 40);
+
+  for (let i = 0; i < 12; i++) {
+    const light = rnd() > 0.45;
+    g.fillStyle(light ? C.mossLight : C.forestDeep, 0.12 + rnd() * 0.18);
+    g.fillEllipse(rnd() * 40, rnd() * 40, 5 + rnd() * 13, 3 + rnd() * 8);
+  }
+
+  g.lineStyle(1, C.mossLight, 0.24);
+  for (let i = 0; i < 5; i++) {
+    const x = 3 + rnd() * 34;
+    const y = 6 + rnd() * 30;
+    g.lineBetween(x, y, x - 1.5, y - 4 - rnd() * 3);
+  }
+
+  if (variant === 3) {
+    g.fillStyle(C.moon, 0.35);
+    g.fillCircle(8 + rnd() * 24, 8 + rnd() * 24, 1.1);
+    g.fillCircle(8 + rnd() * 24, 8 + rnd() * 24, 1.1);
+  }
+};
+
+const drawPathTile = (g: Phaser.GameObjects.Graphics, variant: number): void => {
+  const rnd = mulberry32(330 + variant * 71);
+  g.fillStyle(C.dirt, 1);
+  g.fillRect(0, 0, 40, 40);
+  for (let i = 0; i < 10; i++) {
+    g.fillStyle(rnd() > 0.5 ? 0x574534 : 0x362a20, 0.35 + rnd() * 0.3);
+    g.fillEllipse(rnd() * 40, rnd() * 40, 4 + rnd() * 12, 3 + rnd() * 7);
+  }
+  g.fillStyle(0x6b5a46, 0.5);
+  for (let i = 0; i < 4; i++) g.fillCircle(rnd() * 38 + 1, rnd() * 38 + 1, 1 + rnd());
+  // a few blades creeping over the trail
+  g.lineStyle(1, C.mossMid, 0.5);
+  for (let i = 0; i < 3; i++) {
+    const x = rnd() * 38;
+    const y = rnd() * 38;
+    g.lineBetween(x, y, x + 2, y - 4);
+  }
+};
+
+const drawTree = (g: Phaser.GameObjects.Graphics, variant: number): void => {
+  const W = 130;
+  shadow(g, W / 2, 158, 82, 16);
+
+  // roots
+  g.fillStyle(0x33251d, 1);
+  g.fillTriangle(56, 156, 46, 162, 62, 162);
+  g.fillTriangle(74, 156, 84, 162, 68, 162);
+
+  if (variant === 2) {
+    // dead tree: silhouette only
+    g.fillStyle(0x241a15, 1);
+    g.fillRoundedRect(60, 54, 12, 106, 4);
+    g.lineStyle(2.5, INK, 1);
+    g.strokeRoundedRect(60, 54, 12, 106, 4);
+    g.lineStyle(6, 0x241a15, 1);
+    g.beginPath();
+    g.moveTo(66, 92);
+    g.lineTo(36, 70);
+    g.lineTo(22, 72);
+    g.moveTo(66, 76);
+    g.lineTo(94, 56);
+    g.lineTo(108, 58);
+    g.strokePath();
+    g.lineStyle(1.5, C.moon, 0.16);
+    g.lineBetween(63, 58, 63, 156);
+    return;
+  }
+
+  // trunk
+  g.fillStyle(0x3b2a20, 1);
+  g.fillRoundedRect(57, 92, 18, 68, 4);
+  g.lineStyle(2.5, INK, 1);
+  g.strokeRoundedRect(57, 92, 18, 68, 4);
+  g.lineStyle(1.5, 0x1f1611, 0.7);
+  g.lineBetween(63, 104, 63, 152);
+  g.lineBetween(69, 112, 69, 148);
+
+  if (variant === 1) {
+    // pine
+    const tiers: [number, number, number][] = [
+      [40, 22, 92],
+      [54, 48, 84],
+      [66, 74, 74],
+      [76, 100, 62],
+    ];
+    tiers.forEach(([y, half, top], i) => {
+      g.fillStyle(i % 2 === 0 ? 0x24402f : 0x1d3628, 1);
+      g.fillTriangle(65, top, 65 - half, y + top - 6, 65 + half, y + top - 6);
+      g.lineStyle(2, INK, 0.9);
+      g.strokeTriangle(65, top, 65 - half, y + top - 6, 65 + half, y + top - 6);
+    });
+    g.lineStyle(2, C.moon, 0.14);
+    g.lineBetween(65, 24, 34, 106);
+    return;
+  }
+
+  // broadleaf crown: overlapping lobes
+  const lobes: [number, number, number, number][] = [
+    [65, 68, 118, 88],
+    [36, 62, 70, 60],
+    [94, 60, 72, 62],
+    [64, 44, 84, 56],
+  ];
+  lobes.forEach(([x, y, w, h], i) => {
+    g.fillStyle(i === 0 ? 0x223c2b : 0x28452f, 1);
+    g.fillEllipse(x, y, w, h);
+    g.lineStyle(2.5, INK, 0.85);
+    g.strokeEllipse(x, y, w, h);
+  });
+  g.fillStyle(C.mossMid, 0.55);
+  g.fillEllipse(46, 48, 50, 30);
+  g.fillStyle(C.mossLight, 0.3);
+  g.fillEllipse(42, 42, 26, 16);
+  g.lineStyle(2, C.moon, 0.18);
+  g.beginPath();
+  g.arc(65, 64, 54, Math.PI * 1.05, Math.PI * 1.55);
+  g.strokePath();
+};
+
+const drawBush = (g: Phaser.GameObjects.Graphics): void => {
+  shadow(g, 30, 38, 40, 8);
+  g.fillStyle(0x2b4733, 1);
+  g.fillEllipse(18, 28, 30, 22);
+  g.fillEllipse(40, 26, 32, 24);
+  g.fillEllipse(30, 18, 36, 24);
+  g.lineStyle(2, INK, 0.8);
+  g.strokeEllipse(18, 28, 30, 22);
+  g.strokeEllipse(40, 26, 32, 24);
+  g.strokeEllipse(30, 18, 36, 24);
+  g.fillStyle(C.mossLight, 0.35);
+  g.fillEllipse(24, 14, 14, 8);
+};
+
+const drawFern = (g: Phaser.GameObjects.Graphics): void => {
+  g.lineStyle(2, C.mossMid, 1);
+  for (let i = -2; i <= 2; i++) {
+    g.beginPath();
+    g.moveTo(22, 28);
+    g.lineTo(22 + i * 8, 10 + Math.abs(i) * 4);
+    g.strokePath();
+    g.fillStyle(C.mossLight, 0.55);
+    for (let j = 1; j <= 3; j++) {
+      const t = j / 4;
+      g.fillEllipse(22 + i * 8 * t, 28 - 18 * t, 5, 2);
+    }
+  }
+};
+
+const drawRock = (g: Phaser.GameObjects.Graphics): void => {
+  shadow(g, 28, 34, 40, 7);
+  g.fillStyle(0x5a5c52, 1);
+  g.beginPath();
+  g.moveTo(4, 32);
+  g.lineTo(10, 14);
+  g.lineTo(26, 6);
+  g.lineTo(44, 14);
+  g.lineTo(52, 30);
+  g.lineTo(46, 36);
+  g.lineTo(10, 36);
+  g.closePath();
+  g.fillPath();
+  g.lineStyle(2.5, INK, 1);
+  g.strokePath();
+  g.fillStyle(0x767a6c, 0.7);
+  g.fillTriangle(14, 16, 26, 8, 34, 14);
+  g.fillStyle(C.mossMid, 0.55);
+  g.fillEllipse(18, 30, 18, 7);
+};
+
+const drawStump = (g: Phaser.GameObjects.Graphics): void => {
+  shadow(g, 25, 34, 38, 7);
+  g.fillStyle(0x3b2a20, 1);
+  g.fillRoundedRect(8, 16, 34, 18, 4);
+  g.lineStyle(2.5, INK, 1);
+  g.strokeRoundedRect(8, 16, 34, 18, 4);
+  g.fillStyle(0x6b5340, 1);
+  g.fillEllipse(25, 16, 34, 13);
+  g.lineStyle(2, INK, 1);
+  g.strokeEllipse(25, 16, 34, 13);
+  g.lineStyle(1, 0x4a372c, 0.9);
+  g.strokeEllipse(25, 16, 22, 8);
+  g.strokeEllipse(25, 16, 12, 4);
+  g.fillStyle(C.mossMid, 0.5);
+  g.fillEllipse(14, 20, 8, 4);
+};
+
+const drawForage = (g: Phaser.GameObjects.Graphics, kind: string): void => {
+  shadow(g, 24, 44, 26, 5);
+  const leaf = (x: number, y: number, dir: number): void => {
+    g.fillStyle(C.mossMid, 1);
+    g.fillEllipse(x, y, 12, 5);
+    g.lineStyle(1, INK, 0.7);
+    g.strokeEllipse(x, y, 12, 5);
+    g.lineStyle(1, C.ink, 0.25);
+    g.lineBetween(x - 5 * dir, y, x + 5 * dir, y);
+  };
+
+  if (kind === 'bean') {
+    g.lineStyle(2, C.mossMid, 1);
+    g.lineBetween(24, 44, 24, 22);
+    g.lineBetween(24, 32, 14, 24);
+    g.lineBetween(24, 30, 34, 22);
+    leaf(16, 30, 1);
+    leaf(34, 28, -1);
+    leaf(20, 38, 1);
+    [
+      [14, 22],
+      [24, 17],
+      [34, 21],
+    ].forEach(([x, y]) => {
+      g.fillStyle(C.roast, 1);
+      g.fillEllipse(x!, y!, 10, 7);
+      g.lineStyle(1.5, INK, 1);
+      g.strokeEllipse(x!, y!, 10, 7);
+      g.lineStyle(1, INK, 0.8);
+      g.lineBetween(x! - 3, y! - 2, x! + 3, y! + 2);
+    });
+  } else if (kind === 'milk') {
+    // a ring of pale mushrooms
+    const caps: [number, number, number][] = [
+      [14, 30, 1],
+      [26, 22, 1.2],
+      [36, 32, 0.85],
+    ];
+    caps.forEach(([x, y, sc]) => {
+      g.fillStyle(C.crema, 1);
+      g.fillRoundedRect(x - 2 * sc, y, 4 * sc, 12 * sc, 1.5);
+      g.lineStyle(1.5, INK, 1);
+      g.strokeRoundedRect(x - 2 * sc, y, 4 * sc, 12 * sc, 1.5);
+      g.fillStyle(C.steam, 1);
+      g.fillEllipse(x, y, 14 * sc, 8 * sc);
+      g.lineStyle(1.5, INK, 1);
+      g.strokeEllipse(x, y, 14 * sc, 8 * sc);
+      g.fillStyle(0xffffff, 0.65);
+      g.fillCircle(x - 2, y - 1, 1.2);
+    });
+  } else if (kind === 'mushroom') {
+    const caps: [number, number, number, boolean][] = [
+      [16, 26, 1, false],
+      [28, 18, 1.35, true],
+      [38, 28, 0.9, false],
+    ];
+    caps.forEach(([x, y, sc, glow]) => {
+      g.fillStyle(0x2f3f36, 1);
+      g.fillRoundedRect(x - 2 * sc, y, 4 * sc, 14 * sc, 1.5);
+      g.lineStyle(1.5, INK, 1);
+      g.strokeRoundedRect(x - 2 * sc, y, 4 * sc, 14 * sc, 1.5);
+      g.fillStyle(glow ? 0x8fe0d2 : 0x5fa89c, 1);
+      g.fillEllipse(x, y, 16 * sc, 9 * sc);
+      g.lineStyle(1.5, INK, 1);
+      g.strokeEllipse(x, y, 16 * sc, 9 * sc);
+      g.fillStyle(0xffffff, 0.8);
+      g.fillCircle(x - 3 * sc, y - 1, 1.2);
+      g.fillCircle(x + 3 * sc, y + 1, 1);
+    });
+  } else if (kind === 'ember') {
+    g.lineStyle(2, 0x3d3326, 1);
+    g.lineBetween(24, 44, 24, 20);
+    g.lineBetween(24, 30, 12, 24);
+    g.lineBetween(24, 28, 36, 22);
+    leaf(16, 36, 1);
+    leaf(32, 34, -1);
+    [
+      [12, 22],
+      [24, 16],
+      [36, 20],
+      [20, 28],
+    ].forEach(([x, y]) => {
+      g.fillStyle(C.ember, 1);
+      g.fillCircle(x!, y!, 4.2);
+      g.lineStyle(1, INK, 0.9);
+      g.strokeCircle(x!, y!, 4.2);
+      g.fillStyle(C.gold, 1);
+      g.fillCircle(x! - 1, y! - 1, 1.6);
+    });
+  } else {
+    // void bean
+    g.lineStyle(2, 0x2c2430, 1);
+    g.lineBetween(24, 44, 24, 16);
+    leaf(17, 34, 1);
+    leaf(31, 30, -1);
+    g.fillStyle(C.plum, 1);
+    g.fillEllipse(24, 14, 13, 20);
+    g.lineStyle(1.5, INK, 1);
+    g.strokeEllipse(24, 14, 13, 20);
+    g.lineStyle(1.2, C.crema, 0.8);
+    g.lineBetween(21, 8, 27, 20);
+    g.fillStyle(C.crema, 0.9);
+    g.fillCircle(29, 9, 1.3);
+    g.fillCircle(19, 18, 1);
+  }
+};
+
+const drawTrailhead = (g: Phaser.GameObjects.Graphics): void => {
+  shadow(g, 60, 162, 84, 14);
+
+  // stone base
+  g.fillStyle(0x4a4a42, 1);
+  g.fillEllipse(60, 158, 66, 18);
+  g.lineStyle(2, INK, 1);
+  g.strokeEllipse(60, 158, 66, 18);
+
+  // post
+  g.fillStyle(0x4a3126, 1);
+  g.fillRoundedRect(52, 56, 14, 104, 3);
+  g.lineStyle(2.5, INK, 1);
+  g.strokeRoundedRect(52, 56, 14, 104, 3);
+  g.lineStyle(1, 0x2a1c16, 0.7);
+  g.lineBetween(57, 70, 57, 150);
+
+  // crossbeam
+  g.fillStyle(0x4a3126, 1);
+  g.fillRoundedRect(24, 52, 68, 9, 2);
+  g.lineStyle(2, INK, 1);
+  g.strokeRoundedRect(24, 52, 68, 9, 2);
+
+  // sign boards with a painted arrow
+  const board = (x: number, y: number, w: number, h: number): void => {
+    g.fillStyle(0x6b5340, 1);
+    g.fillRoundedRect(x, y, w, h, 2);
+    g.lineStyle(2, INK, 1);
+    g.strokeRoundedRect(x, y, w, h, 2);
+    g.lineStyle(2, C.cremaDim, 0.75);
+    g.lineBetween(x + 6, y + h / 2, x + w - 12, y + h / 2);
+    g.fillTriangle(x + w - 14, y + h / 2 - 5, x + w - 14, y + h / 2 + 5, x + w - 4, y + h / 2);
+  };
+  board(18, 72, 62, 20);
+  board(62, 98, 48, 17);
+
+  // lantern hanging from the beam
+  g.lineStyle(1.5, INK, 1);
+  g.lineBetween(88, 61, 88, 70);
+  g.fillStyle(0x241a16, 1);
+  g.fillRoundedRect(78, 70, 20, 26, 3);
+  g.lineStyle(2, INK, 1);
+  g.strokeRoundedRect(78, 70, 20, 26, 3);
+  g.fillStyle(C.ember, 1);
+  g.fillRoundedRect(82, 75, 12, 16, 2);
+  g.fillStyle(C.gold, 1);
+  g.fillCircle(88, 83, 2.6);
+  g.fillStyle(0x241a16, 1);
+  g.fillRect(75, 94, 26, 3);
+  g.fillRect(75, 68, 26, 3);
+
+  // carved moon on the post
+  g.lineStyle(1.5, C.moon, 0.6);
+  g.beginPath();
+  g.arc(59, 132, 6, Math.PI * 0.2, Math.PI * 1.2);
+  g.strokePath();
+};
+
+const drawElderSlime = (g: Phaser.GameObjects.Graphics): void => {
+  drawSlime(g, 0x3f5c3e, C.gold, 2);
+  // glowcaps growing out of its back
+  const caps: [number, number][] = [
+    [44, 18],
+    [56, 12],
+    [70, 18],
+  ];
+  caps.forEach(([x, y]) => {
+    g.fillStyle(0x2f3f36, 1);
+    g.fillRect(x - 1.5, y + 4, 3, 8);
+    g.fillStyle(0x8fe0d2, 1);
+    g.fillEllipse(x, y + 3, 13, 7);
+    g.lineStyle(1.5, INK, 1);
+    g.strokeEllipse(x, y + 3, 13, 7);
+    g.fillStyle(0xffffff, 0.7);
+    g.fillCircle(x - 2, y + 2, 1.1);
+  });
+};
+
 /* ------------------------------------------------------------------ */
 
 const drawVignette = (ctx: CanvasRenderingContext2D, w: number, h: number): void => {
@@ -762,9 +1147,32 @@ export const buildTextures = (scene: Phaser.Scene): void => {
   bake(scene, 'heart-empty', 26, 24, (g) => drawHeart(g, false));
   bake(scene, 'candle', 28, 44, drawCandle);
   bake(scene, 'stairs', 40, 40, drawStairs);
-  bake(scene, 'slime', 46, 36, drawSlime);
+  bake(scene, 'slime', 46, 36, (g) => drawSlime(g, C.roast, C.ember));
+  bake(scene, 'slime-forest', 46, 36, (g) => drawSlime(g, C.mossMid, C.gold));
+  bake(scene, 'elder-slime', 92, 78, drawElderSlime);
   bake(scene, 'moth', 36, 30, drawMoth);
   bake(scene, 'guardian', 100, 80, drawGuardian);
+
+  // Forest floor and props.
+  for (let i = 0; i < 4; i++) {
+    bake(scene, `grass${i}`, 40, 40, (g) => drawGrassTile(g, i));
+  }
+  for (let i = 0; i < 2; i++) {
+    bake(scene, `path${i}`, 40, 40, (g) => drawPathTile(g, i));
+  }
+  for (let i = 0; i < 3; i++) {
+    bake(scene, `tree${i}`, 130, 170, (g) => drawTree(g, i));
+  }
+  bake(scene, 'bush', 60, 44, drawBush);
+  bake(scene, 'fern', 44, 30, drawFern);
+  bake(scene, 'rock', 56, 40, drawRock);
+  bake(scene, 'stump', 50, 38, drawStump);
+  bake(scene, 'trailhead', 120, 170, drawTrailhead);
+
+  const forageKinds = ['bean', 'milk', 'mushroom', 'ember', 'void'] as const;
+  forageKinds.forEach((kind) => {
+    bake(scene, `forage-${kind}`, 48, 48, (g) => drawForage(g, kind));
+  });
 
   for (let i = 0; i < 4; i++) {
     bake(scene, `floor${i}`, 40, 40, (g) => drawFloorTile(g, i));

@@ -5,7 +5,7 @@ import { BootScene } from './scenes/BootScene';
 import { TitleScene } from './scenes/TitleScene';
 import { ShopScene } from './scenes/ShopScene';
 import { DuskScene } from './scenes/DuskScene';
-import { DungeonScene } from './scenes/DungeonScene';
+import { WoodsScene } from './scenes/WoodsScene';
 import { LedgerScene } from './scenes/LedgerScene';
 
 export const gameConfig: Phaser.Types.Core.GameConfig = {
@@ -27,5 +27,5 @@ export const gameConfig: Phaser.Types.Core.GameConfig = {
       debug: false,
     },
   },
-  scene: [BootScene, TitleScene, ShopScene, DuskScene, DungeonScene, LedgerScene],
+  scene: [BootScene, TitleScene, ShopScene, DuskScene, WoodsScene, LedgerScene],
 };

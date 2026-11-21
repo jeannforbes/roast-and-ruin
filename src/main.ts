@@ -21,6 +21,11 @@ const boot = async (): Promise<void> => {
 
   const game = new Phaser.Game(gameConfig);
 
+  // Dev-only handle for smoke tests and console poking; stripped from builds.
+  if (import.meta.env.DEV) {
+    (window as Window & { __rrGame?: Phaser.Game }).__rrGame = game;
+  }
+
   game.events.once(Phaser.Core.Events.READY, () => {
     // Phaser listens for keys on window, so the canvas does not need focus to
     // play. Keep it tabbable for keyboard users, but don't steal the ring.

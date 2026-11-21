@@ -13,6 +13,7 @@ export class ShopScene extends PhaseStub {
         'Pour gauge: stop the needle in the sweet spot for a perfect shot',
         'Coins, reputation, ingredient spend and the end-of-shift tally',
       ],
+      next: { scene: 'Dusk', label: 'Close up for dusk →' },
     });
   }
 }

@@ -15,11 +15,11 @@ export interface Ingredient {
 }
 
 export const INGREDIENTS: Record<IngredientId, Ingredient> = {
-  bean: { id: 'bean', name: 'Coffee bean', source: 'cellar shelves', color: C.roast },
-  milk: { id: 'milk', name: 'Milk', source: 'the cold larder', color: C.steam },
-  mushroom: { id: 'mushroom', name: 'Cave mushroom', source: 'damp corners', color: C.cremaDim },
-  ember: { id: 'ember', name: 'Ember pod', source: 'braziers below', color: C.ember },
-  void: { id: 'void', name: 'Void bean', source: 'the deepest room', color: C.plum },
+  bean: { id: 'bean', name: 'Wild bean', source: 'bean groves', color: C.roast },
+  milk: { id: 'milk', name: 'Moonmilk', source: 'moonmilk rings', color: C.steam },
+  mushroom: { id: 'mushroom', name: 'Glowcap', source: 'glowcap circles', color: C.moon },
+  ember: { id: 'ember', name: 'Emberberry', source: 'emberberry thickets', color: C.ember },
+  void: { id: 'void', name: 'Void bean', source: 'the deepest grove', color: C.plum },
 };
 
 export const INGREDIENT_ORDER: IngredientId[] = ['bean', 'milk', 'mushroom', 'ember', 'void'];
@@ -89,7 +89,7 @@ export const DRINKS: Drink[] = [
   },
   {
     id: 'coldbrew',
-    name: 'Cellar Cold Brew',
+    name: 'Nightjar Cold Brew',
     price: 27,
     rep: 28,
     needs: { bean: 2 },
@@ -235,9 +235,9 @@ export const customersForDay = (day: number): number => 5 + Math.min(3, Math.flo
 
 /** Depths are 1-indexed. */
 export const DEPTHS = [
-  { depth: 1, name: 'The Cellar', floors: 2, unlockDay: 1, loot: 1, blurb: 'Shelves, sacks, and something breathing.' },
-  { depth: 2, name: 'The Undercroft', floors: 3, unlockDay: 3, loot: 1.45, blurb: 'Cold stone. Warmer embers.' },
-  { depth: 3, name: 'The Deep Grind', floors: 4, unlockDay: 6, loot: 2, blurb: 'The burrs down here never stop turning.' },
+  { depth: 1, name: 'The Bean Groves', floors: 2, unlockDay: 1, loot: 1, blurb: 'Wild beans and something moving between the trees.' },
+  { depth: 2, name: 'The Glowcap Rings', floors: 3, unlockDay: 3, loot: 1.45, blurb: 'Cold light, warm embers, and a hungry moss.' },
+  { depth: 3, name: 'The Deep Grove', floors: 4, unlockDay: 6, loot: 2, blurb: 'Where the void beans grow, the lantern dims.' },
 ] as const;
 
 export const depthInfo = (depth: number) => DEPTHS[Math.min(DEPTHS.length, Math.max(1, depth)) - 1];

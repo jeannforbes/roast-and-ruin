@@ -182,7 +182,7 @@ export class TitleScene extends Phaser.Scene {
       .setAlpha(0.4)
       .setBlendMode(Phaser.BlendModes.ADD);
 
-    // The cone of shop light falls into the cellar.
+    // The cone of shop light spills out into the dark.
     g.fillStyle(C.gold, 0.045);
     g.fillTriangle(MID - 26, 100, MID + 26, 100, MID + 210, 640);
     g.fillTriangle(MID - 26, 100, MID + 26, 100, MID - 210, 640);
@@ -242,7 +242,7 @@ export class TitleScene extends Phaser.Scene {
     // Menu.
     const saved = hasSave();
     const save = saved ? loadMeta() : null;
-    let cursorY = 304;
+    let cursorY = 300;
 
     if (saved) {
       new Button(this, {
@@ -274,7 +274,25 @@ export class TitleScene extends Phaser.Scene {
     });
     this.newRunButton = newRun;
     this.primary = () => (saved ? this.continueRun() : this.requestNewRun(false, newRun));
-    cursorY += 82;
+    cursorY += 70;
+
+    // Prototype shortcut: the woods are playable while the shop is a stub.
+    new Button(this, {
+      x,
+      y: cursorY,
+      w: 372,
+      h: 54,
+      label: 'Walk into the woods',
+      sublabel: 'prototype · night forage only, shop skipped',
+      align: 'left',
+      variant: 'ghost',
+      onClick: () => {
+        sfx.click();
+        sfx.descend();
+        this.scene.start('Woods');
+      },
+    });
+    cursorY += 66;
 
     // Second-step confirmation caption.
     this.add
@@ -282,17 +300,17 @@ export class TitleScene extends Phaser.Scene {
       .setOrigin(0, 0.5);
 
     // Two shifts, explained.
-    const py = 486;
+    const py = cursorY + 32;
     const panel = this.add.graphics();
-    inkPanel(panel, 372, 132, { fill: C.inkSoft, stroke: C.line, radius: 6, alpha: 0.85 });
+    inkPanel(panel, 372, 116, { fill: C.inkSoft, stroke: C.line, radius: 6, alpha: 0.85 });
     panel.setPosition(x, py);
 
     const badges: [string, number, string, string][] = [
       ['DAY', C.roast, 'Take orders, pull shots, keep the queue happy.', '07:00 — 19:00'],
-      ['NIGHT', C.plum, 'Clear the cellar, carry ingredients home.', '19:00 — late'],
+      ['NIGHT', C.plum, 'Forage the woods, carry ingredients home.', '19:00 — late'],
     ];
     badges.forEach(([label, color, copy, hours], i) => {
-      const yy = py + 30 + i * 62;
+      const yy = py + 27 + i * 52;
       const badge = this.add.graphics();
       badge.fillStyle(color, 1);
       badge.fillRoundedRect(x + 18, yy - 12, 62, 23, 3);
@@ -300,7 +318,7 @@ export class TitleScene extends Phaser.Scene {
       this.add.text(x + 94, yy - 14, copy, mono(11.5, C.cremaDim)).setOrigin(0, 0);
       this.add.text(x + 94, yy + 4, hours, mono(10, C.cremaFaint)).setOrigin(0, 0);
     });
-    divider(panel, 22, 66, 350, C.line, 0.8);
+    divider(panel, 22, 58, 350, C.line, 0.8);
 
     if (!reducedMotion()) {
       mark.setAlpha(0);

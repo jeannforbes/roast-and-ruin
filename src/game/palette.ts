@@ -1,7 +1,7 @@
 /**
  * Roast & Ruin — the whole game is built out of this palette.
- * Two light sources, one world: warm shop lamplight above, cold cellar
- * shadow below. Everything else is crema and ink.
+ * Two light sources, one world: warm shop lamplight within, cold moonlight
+ * in the woods beyond. Everything else is crema and ink.
  */
 export const C = {
   ink: 0x120d0b,
@@ -19,6 +19,15 @@ export const C = {
   plum: 0x8a5f86,
   blood: 0xc2453b,
   steam: 0xa9c6c2,
+
+  // The woods: cold moonlight over a warm lantern.
+  forestDeep: 0x0e1712,
+  forest: 0x18261c,
+  mossDark: 0x27402e,
+  mossMid: 0x44613f,
+  mossLight: 0x6f8f5e,
+  dirt: 0x453629,
+  moon: 0xbfd8cf,
 } as const;
 
 /** Numeric Phaser colour to a CSS hex string. */

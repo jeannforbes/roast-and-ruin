@@ -1,16 +1,18 @@
 # Roast & Ruin
 
-**Pull shots by day. Delve for beans by night.**
+**Pull shots by day. Forage the woods by night.**
 
-A two-shift coffee-shop roguelite built with Phaser 4 and TypeScript. You run a café
-during the day, then go down into the cellar beneath it to gather the ingredients
-you cannot buy. Both halves feed each other: the menu you can serve is limited by
-what you hauled home, and the upgrades you can afford come from what you sold.
+A two-shift coffee-shop roguelite built with Phaser 4 and TypeScript. You run a
+café during the day, then take a lantern into the woods to gather the strange
+ingredients you cannot buy. Both halves feed each other: the menu you can serve
+is limited by what you hauled home, and the upgrades you can afford come from
+what you sold.
 
-> **Status: scaffold.** The project runs end to end. The title screen, phase flow,
-> art pipeline, audio synthesis, economy data and save system are in place. The
-> four phase scenes are deliberate stubs — see [docs/DESIGN.md](docs/DESIGN.md) for
-> the loop and the build order.
+> **Status: playable night prototype.** The title screen, phase flow, art
+> pipeline, audio synthesis, economy data, save system and **the woods** are in
+> place and running. The day, dusk and dawn scenes are deliberate stubs waiting
+> for someone to implement them — see [docs/DESIGN.md](docs/DESIGN.md) for the
+> intended loop and the numbers worked out for that later work.
 
 ## Run it
 
@@ -30,23 +32,43 @@ bundled via `@fontsource`.
 
 | | |
 |---|---|
-| **A / D** or **← / →** | move along the bar |
-| **E** | interact: take an order, serve, use the stairs |
-| **Space** | pull a shot / strike |
+| **WASD** or **arrow keys** | move through the woods |
+| **Space** or **click** | swing the steam wand |
+| **E** | head home, when standing by the trailhead lantern |
+| **Esc** | pause in the woods / back to title on stub screens |
 | **M** | mute |
-| **Esc** | back to title (from a stub screen) |
 
-## How the loop works
+## What is playable now
+
+From the title screen, choose **Walk into the woods** to skip straight to the
+prototype. You can also step through the stubs: **Open for business → Close up
+for dusk → Take the lantern**.
+
+In the woods:
+
+- Wander a procedurally laid out forest of clearings and winding trails.
+- Forage Wild beans, Moonmilk, Glowcaps, Emberberries and the rare Void bean.
+  The satchel in the HUD counts what is currently on you.
+- Fight slimes, moths and a moss-backed elder slime. Slimes hop toward you when
+  they notice you; moths veer in erratically. Space swings in the direction you
+  last moved.
+- Return to the trailhead lantern and press **E** to bank the haul. Death costs
+  half the satchel, but you always wake back at the shop.
+
+The haul and coins are written to the save file, so the eventual day shift will
+be able to spend them. Right now the shop stub cannot spend anything yet.
+
+## How the loop is meant to work
 
 1. **Day — the shop.** Customers queue with orders drawn from the menu your pantry
    and reputation allow. You walk the bar, pull shots on a timing gauge, and serve
-   before patience runs out.
+   before patience runs out. *(stub)*
 2. **Dusk — the ledger.** Takings become upgrades that widen the pour window, slow
-   the needle, add a heart, light the dark, or extend patience.
-3. **Night — the delve.** Procedurally generated floors under the shop. Fight,
-   grab ingredients, find the stairs. The deeper the delve, the better the beans.
+   the needle, add a heart, light the lantern, or extend patience. *(stub)*
+3. **Night — the woods.** Fight, forage, and carry ingredients back to the
+   trailhead. The deeper you go, the stranger the beans. *(playable)*
 4. **Dawn — the ledger again.** The haul restocks the pantry; the next day's menu
-   gets richer. Then the shop opens.
+   gets richer. Then the shop opens. *(stub)*
 
 ## Project shape
 
@@ -67,29 +89,30 @@ src/
     ui/theme.ts            type styles, panels, buttons, bars
     scenes/
       BootScene.ts         bakes textures, then starts the title
-      TitleScene.ts        the double-exposure doorway (shop above, cellar below)
+      TitleScene.ts        the double-exposure doorway + woods shortcut
       PhaseStub.ts         shared shell for the unbuilt phase screens
       ShopScene.ts         DAY   — stub
       DuskScene.ts         DUSK  — stub
-      DungeonScene.ts      NIGHT — stub
+      WoodsScene.ts        NIGHT — playable forage + combat
       LedgerScene.ts       DAWN  — stub
 ```
 
 ## Art direction
 
 A woodcut café at closing time: flat ink shapes, two-pixel outlines, one warm
-lamplight. Crema and espresso carry the shop; the cellar keeps the same ink but
-loses the warmth. Fraunces sets the menu and the headlines, IBM Plex Mono keeps
-the ledger and the HUD. The title screen's signature is the doorway: a café arch
-that is also a stairwell, with the counter and a cup in the foreground.
+lamplight. Crema and espresso carry the shop; the woods keep the same ink but
+trade the warmth for moonlight, moss and fireflies. Fraunces sets the menu and
+the headlines, IBM Plex Mono keeps the ledger and the HUD. The title screen's
+signature is the doorway: a café arch that is also a passage into the dark, with
+the counter and a cup in the foreground.
 
 ## Roadmap
 
 - [x] Scaffold: run/build, palette, type, procedural art, audio, save state
+- [x] Woods prototype: movement, foraging, combat, exit, summary
 - [ ] Day shift: customers, orders, pour gauge, patience, takings
-- [ ] Dusk ledger: upgrades and delve selection
-- [ ] Night shift: dungeon generation, movement, combat, loot, candlelight
+- [ ] Dusk ledger: upgrades and trail selection
 - [ ] Dawn ledger: results, restock, next day
-- [ ] Balance, onboarding, mobile touch controls, GitHub Pages deploy
+- [ ] Balance, onboarding, mobile touch controls
 
 Built with [Phaser 4](https://phaser.io). Code is MIT licensed; see [LICENSE](LICENSE).
