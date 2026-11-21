@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
+    <title>Roast &amp; Ruin — a two-shift coffee shop roguelite</title>
+    <meta
+      name="description"
+      content="Pull espresso by day, delve the cellar for beans by night. A coffee-shop roguelite made with Phaser."
+    />
+    <meta name="theme-color" content="#120d0b" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  </head>
+  <body>
+    <main class="stage">
+      <div id="game" class="game" role="application" aria-label="Roast and Ruin game canvas">
+        <div class="boot" id="boot">
+          <p class="boot-mark">Roast <span>&amp;</span> Ruin</p>
+          <p class="boot-line">grinding the beans…</p>
+        </div>
+      </div>
+
+      <footer class="hint" aria-hidden="true">
+        <span><b>A</b> <b>D</b> move</span>
+        <span><b>E</b> interact</span>
+        <span><b>space</b> pour · strike</span>
+        <span><b>M</b> mute</span>
+        <span class="hint-tail">a shift takes about two minutes</span>
+      </footer>
+    </main>
+
+    <noscript>
+      <p class="noscript">Roast &amp; Ruin needs JavaScript and WebGL enabled.</p>
+    </noscript>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
