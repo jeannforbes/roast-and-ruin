@@ -21,7 +21,8 @@ const RUN_SECONDS = 150;
 const PLAYER_SPEED = 250;
 const ATTACK_COOLDOWN = 340;
 const ATTACK_RANGE = 110;
-const ATTACK_ARC = 1.1;
+const SWEEP_ARC = 2.0;
+const SWING_MS = 240;
 const INVULN_MS = 1200;
 
 type Box = Phaser.GameObjects.Rectangle & { body: Phaser.Physics.Arcade.Body };
@@ -54,6 +55,16 @@ interface RunStats {
   kills: number;
   coins: number;
   haul: Record<IngredientId, number>;
+}
+
+/** A blade sweep: a straight line rotating from one arc edge to the other. */
+interface Swing {
+  graphics: Phaser.GameObjects.Graphics;
+  startAngle: number;
+  endAngle: number;
+  elapsed: number;
+  duration: number;
+  hit: Set<Enemy>;
 }
 
 const clock = (seconds: number): string => {
@@ -89,6 +100,7 @@ export class WoodsScene extends Phaser.Scene {
   private distanceText!: Phaser.GameObjects.Text;
   private progress!: ReturnType<typeof progressBar>;
   private reticle!: Phaser.GameObjects.Graphics;
+  private swing?: Swing;
   private lastHint = '';
   private overlay?: Phaser.GameObjects.Container;
   private overlayButtons: Button[] = [];
@@ -100,7 +112,6 @@ export class WoodsScene extends Phaser.Scene {
   private hp = 3;
   private maxHp = 3;
   private timeLeft = RUN_SECONDS;
-  private aim = 0;
   private attackReadyAt = 0;
   private invulnUntil = 0;
   private knockbackUntil = 0;
@@ -131,8 +142,8 @@ export class WoodsScene extends Phaser.Scene {
     this.overlayButtons = [];
     this.lastHint = '';
     this.timeLeft = RUN_SECONDS;
-    this.aim = 0;
     this.attackReadyAt = 0;
+    this.swing = undefined;
     this.invulnUntil = 0;
     this.knockbackUntil = 0;
     this.maxHp = 3 + meta.upgrades.charm;
@@ -579,6 +590,7 @@ export class WoodsScene extends Phaser.Scene {
       } else {
         this.movePlayer(time);
         this.updateEnemies(time);
+        this.advanceSwing(delta);
         this.updateForage();
       }
     }
@@ -587,7 +599,6 @@ export class WoodsScene extends Phaser.Scene {
     this.enemies.forEach((e) => {
       if (!e.dead) this.moveLabel(e);
     });
-    this.aim = this.aimAngle();
     this.drawReticle();
     this.updateHint();
     this.updateHud();
@@ -684,39 +695,98 @@ export class WoodsScene extends Phaser.Scene {
     const now = this.time.now;
     if (now < this.attackReadyAt) return;
     this.attackReadyAt = now + ATTACK_COOLDOWN;
-    this.aim = this.aimAngle();
-    sfx.swing();
 
+    // Capture the mouse direction once. Moving the cursor during the swing must
+    // not steer the blade; the sweep is centred on where it was at the click.
+    const aim = this.aimAngle();
+    this.clearSwing();
+    const swing: Swing = {
+      graphics: this.add.graphics().setDepth(this.player.box.y + 2),
+      startAngle: aim - SWEEP_ARC / 2,
+      endAngle: aim + SWEEP_ARC / 2,
+      elapsed: 0,
+      duration: SWING_MS,
+      hit: new Set<Enemy>(),
+    };
+    this.swing = swing;
+    this.drawBlade(swing, 0);
+    sfx.swing();
+  }
+
+  private clearSwing(): void {
+    this.swing?.graphics.destroy();
+    this.swing = undefined;
+  }
+
+  /** Draw the sword as one straight line at its current point in the sweep. */
+  private drawBlade(swing: Swing, progress: number): void {
+    const g = swing.graphics;
+    g.clear();
+    const angle = swing.startAngle + (swing.endAngle - swing.startAngle) * progress;
     const px = this.player.box.x;
     const py = this.player.box.y;
-    const g = this.add.graphics().setDepth(py + 2);
-    g.lineStyle(9, 0xfff4dc, 0.85);
-    g.beginPath();
-    g.arc(px, py, 46, this.aim - 1.0, this.aim + 1.0);
-    g.strokePath();
-    g.lineStyle(2, C.gold, 0.9);
-    g.beginPath();
-    g.arc(px, py, 56, this.aim - 1.05, this.aim + 1.05);
-    g.strokePath();
-    this.tweens.add({
-      targets: g,
-      alpha: 0,
-      scaleX: 1.25,
-      scaleY: 1.25,
-      duration: 200,
-      ease: 'Cubic.out',
-      onComplete: () => g.destroy(),
-    });
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    const inner = 16;
+    const outer = ATTACK_RANGE;
+    const fade = progress > 0.8 ? (1 - progress) / 0.2 : 1;
+
+    g.lineStyle(10, 0xfff4dc, 0.88 * fade);
+    g.lineBetween(px + cos * inner, py + sin * inner, px + cos * outer, py + sin * outer);
+    g.lineStyle(2, C.gold, 0.95 * fade);
+    g.lineBetween(
+      px + cos * (inner + 4),
+      py + sin * (inner + 4),
+      px + cos * (outer - 4),
+      py + sin * (outer - 4),
+    );
+
+    const perp = angle + Math.PI / 2;
+    const gx = px + cos * inner;
+    const gy = py + sin * inner;
+    g.lineStyle(4, C.gold, 0.7 * fade);
+    g.lineBetween(
+      gx + Math.cos(perp) * 9,
+      gy + Math.sin(perp) * 9,
+      gx - Math.cos(perp) * 9,
+      gy - Math.sin(perp) * 9,
+    );
+  }
+
+  private advanceSwing(delta: number): void {
+    const swing = this.swing;
+    if (!swing) return;
+    const from = swing.elapsed / swing.duration;
+    swing.elapsed = Math.min(swing.duration, swing.elapsed + delta);
+    const to = swing.elapsed / swing.duration;
+    this.drawBlade(swing, to);
+    this.checkSweepHits(swing, from, to);
+    if (to >= 1) this.clearSwing();
+  }
+
+  /** Hit an enemy when the rotating blade line crosses its hitbox. */
+  private checkSweepHits(swing: Swing, from: number, to: number): void {
+    const px = this.player.box.x;
+    const py = this.player.box.y;
+    const span = swing.endAngle - swing.startAngle;
 
     for (const e of this.enemies) {
-      if (e.dead) continue;
+      if (e.dead || swing.hit.has(e)) continue;
       const dx = e.box.x - px;
       const dy = e.box.y - py;
       const dist = Math.hypot(dx, dy);
       if (dist > ATTACK_RANGE + e.radius) continue;
-      const diff = Phaser.Math.Angle.Wrap(Math.atan2(dy, dx) - this.aim);
-      if (Math.abs(diff) > ATTACK_ARC) continue;
-      this.hurtEnemy(e);
+
+      let rel = Phaser.Math.Angle.Wrap(Math.atan2(dy, dx) - swing.startAngle);
+      if (rel < 0) rel += Math.PI * 2;
+      // Wider tolerance up close, where a few pixels cover more of the arc.
+      const tolerance = Math.min(0.5, Math.atan2(e.radius + 8, Math.max(dist, 24)));
+      const sweptFrom = span * from - tolerance;
+      const sweptTo = span * to + tolerance;
+      if (rel >= sweptFrom && rel <= sweptTo) {
+        swing.hit.add(e);
+        this.hurtEnemy(e);
+      }
     }
   }
 
@@ -779,6 +849,7 @@ export class WoodsScene extends Phaser.Scene {
     if (this.dying) return;
     this.dying = true;
     this.cause = 'death';
+    this.clearSwing();
     this.player.box.body.setVelocity(0, 0);
     this.player.box.body.enable = false;
     sfx.death();
@@ -791,6 +862,7 @@ export class WoodsScene extends Phaser.Scene {
     if (this.dying) return;
     this.dying = true;
     this.cause = 'sleep';
+    this.clearSwing();
     this.player.box.body.setVelocity(0, 0);
     this.player.box.body.enable = false;
     sfx.candleOut();
@@ -835,6 +907,7 @@ export class WoodsScene extends Phaser.Scene {
   private finishRun(): void {
     if (this.over) return;
     this.over = true;
+    this.clearSwing();
     this.physics.pause();
     this.player.box.body.setVelocity(0, 0);
 

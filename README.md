@@ -33,8 +33,8 @@ bundled via `@fontsource`.
 | | |
 |---|---|
 | **WASD** or **arrow keys** | move through the woods |
-| **mouse** | aim; the reticle shows where the swing will land |
-| **Space** or **click** | swing the steam wand toward the mouse, not toward your movement |
+| **mouse** | aim; the reticle shows where the middle of the sweep will point |
+| **Space** or **click** | sweep a straight blade line across the mouse direction, not toward your movement |
 | **E** | head home, when standing by the trailhead lantern |
 | **Esc** | pause (the sleep clock pauses too) / back to title on stub screens |
 | **M** | mute |
@@ -56,8 +56,9 @@ In the woods:
 - Forage Wild beans, Moonmilk, Glowcaps, Emberberries and the rare Void bean in
   bands along the trail. The satchel in the HUD counts what is currently on you.
 - Fight slimes, moths and a moss-backed elder slime. Slimes hop toward you when
-  they notice you; moths veer in erratically. Attacks fire in the direction of
-  the mouse click.
+  they notice you; moths veer in erratically. The sword is a straight line that
+  sweeps from one side to the other over 240ms, with the middle of the sweep
+  aimed exactly where the mouse was when you clicked.
 - Three **thermos slots** sit in the HUD. They are visible empty stubs for now;
   the day/dusk shift will fill them with drinks made and equipped before the run.
 - Return to the trailhead lantern and press **E** to bank the full haul.

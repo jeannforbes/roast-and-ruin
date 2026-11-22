@@ -123,9 +123,11 @@ branches, so the only decision is how far to push before turning back.
   the (unbuilt) day/dusk shift.
 - **Player**: 3 health (+1 per iron charm), speed 250px/s, knockback and 1.2s of
   invulnerability when hit. **Attacks are aimed with the mouse**: a reticle marks
-  the cursor's world position and the 110px swing cone is centred on
-  `atan2(cursor - knight)`. Movement direction is irrelevant; Space and click
-  both fire the same aimed swing on a 340ms cooldown.
+  the cursor's world position. The sword is a straight 110px line that sweeps
+  from `aim - 1.0rad` to `aim + 1.0rad` over 240ms, so the midpoint of the sweep
+  points exactly at `atan2(cursor - knight)` captured at the moment of attack.
+  Movement direction is irrelevant; Space and click both fire the same sweep on
+  a 340ms cooldown. Enemies are hit when the rotating line crosses their box.
 - **Forage**: 15 nodes in bands along the trail — 4 Wild bean (x 9–32), 3 Moonmilk
   (30–54), 3 Glowcap (52–76), 3 Emberberry (74–98), 2 Void bean (96–116).
   Touching one adds it to the satchel; it is banked only on a successful return.
@@ -174,8 +176,8 @@ woods summary already performs the pantry/coins part.
 - Title screen with the shop/dark double-exposure, save-aware menu and a direct
   woods shortcut
 - Scene graph and transitions: title → shop (stub) → dusk (stub) → woods → title
-- Playable woods: linear trail with direction cues, mouse-aimed combat, foraging,
-  movement, pause, summary and save
+- Playable woods: linear trail with direction cues, mouse-aimed sword sweep,
+  foraging, movement, pause, summary and save
 - 150-second sleep clock with death/sleep haul loss and a paused clock
 - Three visible thermos slots stubbed for day-shift drinks
 - Actors drawn as labelled hitboxes until sprite art is chosen
