@@ -1,34 +1,39 @@
 import Phaser from 'phaser';
 import { C, css } from '../palette';
 import { GAME_HEIGHT, GAME_WIDTH } from '../constants';
-import { Button, display, divider, inkPanel, mono } from '../ui/theme';
+import { Button, display, divider, inkPanel, mono, progressBar } from '../ui/theme';
 import { reducedMotion } from '../art/draw';
 import { sfx } from '../systems/audio';
 import { meta, saveMeta } from '../state';
 import { INGREDIENTS, IngredientId, INGREDIENT_ORDER, rollIngredient } from '../data/economy';
 
 const TILE = 40;
-const MAP_W = 48;
-const MAP_H = 36;
+const MAP_W = 120;
+const MAP_H = 20;
 const WORLD_W = MAP_W * TILE;
 const WORLD_H = MAP_H * TILE;
 
-const PLAYER_SPEED = 238;
-const ATTACK_COOLDOWN = 360;
-const ATTACK_RANGE = 96;
-const ATTACK_ARC = 1.25;
+const START_X = 5;
+const END_X = MAP_W - 4;
+const TRAIL_HALF_WIDTH = 2;
+const RUN_SECONDS = 150;
 
+const PLAYER_SPEED = 250;
+const ATTACK_COOLDOWN = 340;
+const ATTACK_RANGE = 110;
+const ATTACK_ARC = 1.1;
+const INVULN_MS = 1200;
+
+type Box = Phaser.GameObjects.Rectangle & { body: Phaser.Physics.Arcade.Body };
 type EnemyKind = 'slime' | 'moth' | 'elder';
+type EndCause = 'home' | 'death' | 'sleep';
 
-interface Clearing {
-  x: number;
-  y: number;
-  r: number;
-  kind?: IngredientId;
+interface Actor {
+  box: Box;
+  label: Phaser.GameObjects.Text;
 }
 
-interface Enemy {
-  sprite: Phaser.Physics.Arcade.Sprite;
+interface Enemy extends Actor {
   kind: EnemyKind;
   hp: number;
   speed: number;
@@ -39,8 +44,8 @@ interface Enemy {
 }
 
 interface Forage {
-  sprite: Phaser.GameObjects.Image;
-  glow: Phaser.GameObjects.Image;
+  box: Phaser.GameObjects.Rectangle;
+  label: Phaser.GameObjects.Text;
   id: IngredientId;
   taken: boolean;
 }
@@ -51,30 +56,39 @@ interface RunStats {
   haul: Record<IngredientId, number>;
 }
 
+const clock = (seconds: number): string => {
+  const s = Math.max(0, Math.ceil(seconds));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+};
+
+/**
+ * The night slice: one long, linear trail with a lantern behind you and a
+ * deeper grove ahead. Actors are deliberately plain labelled hitboxes while
+ * the art direction for this phase is still being decided.
+ */
 export class WoodsScene extends Phaser.Scene {
   private pathGrid = new Uint8Array(0);
   private blockedGrid = new Uint8Array(0);
-  private openGrid = new Uint8Array(0);
-  private reachGrid = new Uint8Array(0);
   private occupied = new Set<number>();
 
-  private clearings: Clearing[] = [];
-  private startTile = { x: 8, y: 18 };
+  private start = { x: START_X, y: 10 };
+  private end = { x: END_X, y: 10 };
 
-  private player!: Phaser.Physics.Arcade.Sprite;
-  private glow!: Phaser.GameObjects.Image;
-  private trailhead!: Phaser.GameObjects.Image;
+  private player!: Actor;
+  private trailhead!: Phaser.GameObjects.Rectangle;
   private enemies: Enemy[] = [];
   private forage: Forage[] = [];
   private obstacleGroup!: Phaser.GameObjects.Group;
-  private crawlerGroup!: Phaser.Physics.Arcade.Group;
-  private dust!: Phaser.GameObjects.Particles.ParticleEmitter;
+  private crawlerGroup!: Phaser.GameObjects.Group;
 
   private hud!: Phaser.GameObjects.Container;
-  private hearts: Phaser.GameObjects.Image[] = [];
-  private haulTexts: Partial<Record<IngredientId, Phaser.GameObjects.Text>> = {};
-  private coinText!: Phaser.GameObjects.Text;
+  private hpText!: Phaser.GameObjects.Text;
+  private timerText!: Phaser.GameObjects.Text;
+  private satchelText!: Phaser.GameObjects.Text;
   private hintText!: Phaser.GameObjects.Text;
+  private distanceText!: Phaser.GameObjects.Text;
+  private progress!: ReturnType<typeof progressBar>;
+  private reticle!: Phaser.GameObjects.Graphics;
   private lastHint = '';
   private overlay?: Phaser.GameObjects.Container;
   private overlayButtons: Button[] = [];
@@ -85,15 +99,15 @@ export class WoodsScene extends Phaser.Scene {
   private stats: RunStats = { kills: 0, coins: 0, haul: this.emptyHaul() };
   private hp = 3;
   private maxHp = 3;
-  private facing = 0;
+  private timeLeft = RUN_SECONDS;
+  private aim = 0;
   private attackReadyAt = 0;
   private invulnUntil = 0;
   private knockbackUntil = 0;
-  private startedAt = 0;
-  private lastDustAt = 0;
   private over = false;
   private paused = false;
   private dying = false;
+  private cause: EndCause = 'home';
 
   constructor() {
     super('Woods');
@@ -109,30 +123,29 @@ export class WoodsScene extends Phaser.Scene {
     this.enemies = [];
     this.forage = [];
     this.occupied = new Set();
-    this.hearts = [];
-    this.haulTexts = {};
     this.over = false;
     this.paused = false;
     this.dying = false;
+    this.cause = 'home';
     this.overlay = undefined;
     this.overlayButtons = [];
     this.lastHint = '';
-    this.facing = 0;
+    this.timeLeft = RUN_SECONDS;
+    this.aim = 0;
     this.attackReadyAt = 0;
     this.invulnUntil = 0;
     this.knockbackUntil = 0;
     this.maxHp = 3 + meta.upgrades.charm;
     this.hp = this.maxHp;
-    this.startedAt = this.time.now;
 
     this.cameras.main.setBackgroundColor(css(C.forestDeep));
     this.input.keyboard?.once('keydown', () => sfx.unlock());
 
     this.generate();
     this.renderGround();
-    this.spawnScenery();
+    this.spawnBlockers();
     this.createPlayer();
-    this.addTrailhead();
+    this.placeMarkers();
     this.placeForage();
     this.spawnEnemies();
     this.createAtmosphere();
@@ -142,14 +155,14 @@ export class WoodsScene extends Phaser.Scene {
 
     this.physics.world.setBounds(0, 0, WORLD_W, WORLD_H);
     this.cameras.main.setBounds(0, 0, WORLD_W, WORLD_H);
-    this.cameras.main.startFollow(this.player, true, 0.14, 0.14);
-    this.cameras.main.fadeIn(500, 8, 12, 9);
+    this.cameras.main.startFollow(this.player.box, true, 0.16, 0.12);
+    this.cameras.main.fadeIn(420, 8, 12, 9);
 
-    this.time.delayedCall(1400, () => this.introToast());
+    this.time.delayedCall(1200, () => this.introToast());
   }
 
   /* ------------------------------------------------------------------ */
-  /* Generation                                                          */
+  /* Linear trail                                                         */
   /* ------------------------------------------------------------------ */
 
   private idx(x: number, y: number): number {
@@ -160,200 +173,89 @@ export class WoodsScene extends Phaser.Scene {
     return x >= 0 && y >= 0 && x < MAP_W && y < MAP_H;
   }
 
-  private generate(): void {
-    this.startTile = { x: 8, y: Math.floor(MAP_H / 2) };
-    for (let attempt = 0; attempt < 4; attempt++) {
-      if (this.buildGrids()) return;
-    }
+  private trailY(x: number): number {
+    return Phaser.Math.Clamp(
+      Math.floor(MAP_H / 2) + Math.round(Math.sin(x / 13) * 3 + Math.sin(x / 5.3) * 1.1),
+      4,
+      MAP_H - 5,
+    );
   }
 
-  private buildGrids(): boolean {
+  private generate(): void {
     const n = MAP_W * MAP_H;
     this.pathGrid = new Uint8Array(n);
     this.blockedGrid = new Uint8Array(n);
-    this.openGrid = new Uint8Array(n);
-    this.reachGrid = new Uint8Array(n);
 
-    const start: Clearing = { x: this.startTile.x, y: this.startTile.y, r: 5 };
-    const clearings: Clearing[] = [start];
-
-    for (let tries = 0; tries < 600 && clearings.length < 6; tries++) {
-      const x = Phaser.Math.Between(7, MAP_W - 8);
-      const y = Phaser.Math.Between(7, MAP_H - 8);
-      const far = clearings.every((c) => Phaser.Math.Distance.Between(x, y, c.x, c.y) > 9);
-      if (far) clearings.push({ x, y, r: Phaser.Math.Between(4, 6) });
+    // A single snaking corridor, always wider than the knight.
+    for (let x = 2; x <= MAP_W - 3; x++) {
+      const cy = this.trailY(x);
+      for (let dy = -TRAIL_HALF_WIDTH; dy <= TRAIL_HALF_WIDTH; dy++) {
+        const y = cy + dy;
+        if (this.inBounds(x, y)) this.pathGrid[this.idx(x, y)] = 1;
+      }
     }
 
-    // Trails: connect each clearing to its nearest unvisited neighbour.
-    const unvisited = clearings.slice(1);
-    let cur = start;
-    while (unvisited.length) {
-      let best = 0;
-      let bestDist = Infinity;
-      unvisited.forEach((c, i) => {
-        const d = Phaser.Math.Distance.Between(c.x, c.y, cur.x, cur.y);
-        if (d < bestDist) {
-          bestDist = d;
-          best = i;
-        }
-      });
-      const next = unvisited.splice(best, 1)[0]!;
-      this.carveTrail(cur.x, cur.y, next.x, next.y);
-      cur = next;
-    }
-
-    // Clearings are grass, and trees keep off them.
-    clearings.forEach((c) => {
-      for (let y = c.y - c.r; y <= c.y + c.r; y++) {
-        for (let x = c.x - c.r; x <= c.x + c.r; x++) {
+    // Clearings widen the trail at regular intervals, including the far end.
+    for (const cx of [20, 40, 60, 80, 100, END_X]) {
+      const cy = this.trailY(cx);
+      const r = cx === END_X ? 5 : 4;
+      for (let y = cy - r; y <= cy + r; y++) {
+        for (let x = cx - r; x <= cx + r; x++) {
           if (!this.inBounds(x, y)) continue;
-          if (Phaser.Math.Distance.Between(x, y, c.x, c.y) <= c.r) this.openGrid[this.idx(x, y)] = 1;
+          if (Phaser.Math.Distance.Between(x, y, cx, cy) <= r) this.pathGrid[this.idx(x, y)] = 1;
         }
-      }
-    });
-
-    // Forest fill: clustered stands with open lanes between them.
-    for (let y = 2; y < MAP_H - 2; y++) {
-      for (let x = 2; x < MAP_W - 2; x++) {
-        const i = this.idx(x, y);
-        if (this.pathGrid[i] || this.openGrid[i] || this.nearOpen(x, y)) continue;
-        const noise =
-          Math.sin(x * 0.42) +
-          Math.sin(y * 0.37 + 1.3) +
-          Math.sin((x + y) * 0.21) * 0.9 +
-          Math.sin(x * 0.13 - y * 0.17);
-        let chance = 0.11;
-        if (noise > 1.1) chance = 0.5;
-        else if (noise > 0.35) chance = 0.26;
-        if (Math.random() < chance) this.blockedGrid[i] = 1;
       }
     }
 
-    // Impassable border, so the camera never shows the void.
+    this.start = { x: START_X, y: this.trailY(START_X) };
+    this.end = { x: END_X, y: this.trailY(END_X) };
+
     for (let y = 0; y < MAP_H; y++) {
       for (let x = 0; x < MAP_W; x++) {
-        if (x < 2 || y < 2 || x >= MAP_W - 2 || y >= MAP_H - 2) this.blockedGrid[this.idx(x, y)] = 1;
+        const i = this.idx(x, y);
+        const border = x < 2 || y < 2 || x >= MAP_W - 2 || y >= MAP_H - 2;
+        if (border || !this.pathGrid[i]) this.blockedGrid[i] = 1;
       }
     }
-
-    this.clearings = clearings;
-    const reachable = this.floodFill(start.x, start.y);
-    return reachable > 420;
-  }
-
-  private nearOpen(x: number, y: number): boolean {
-    for (let dy = -1; dy <= 1; dy++) {
-      for (let dx = -1; dx <= 1; dx++) {
-        const nx = x + dx;
-        const ny = y + dy;
-        if (!this.inBounds(nx, ny)) continue;
-        const i = this.idx(nx, ny);
-        if (this.pathGrid[i] || this.openGrid[i]) return true;
-      }
-    }
-    return false;
-  }
-
-  private carveTrail(x0: number, y0: number, x1: number, y1: number): void {
-    let x = x0;
-    let y = y0;
-    let guard = 0;
-    while ((x !== x1 || y !== y1) && guard++ < 600) {
-      const dx = Math.sign(x1 - x);
-      const dy = Math.sign(y1 - y);
-      if (dx !== 0 && (dy === 0 || Math.random() < 0.55)) x += dx;
-      else if (dy !== 0) y += dy;
-      this.brushPath(x, y);
-      if (Math.random() < 0.12) this.brushPath(x + Phaser.Math.Between(-1, 1), y);
-    }
-  }
-
-  private brushPath(x: number, y: number): void {
-    for (let dy = 0; dy <= 1; dy++) {
-      for (let dx = 0; dx <= 1; dx++) {
-        const nx = x + dx;
-        const ny = y + dy;
-        if (!this.inBounds(nx, ny)) continue;
-        this.pathGrid[this.idx(nx, ny)] = 1;
-      }
-    }
-  }
-
-  private floodFill(sx: number, sy: number): number {
-    const queue: number[] = [this.idx(sx, sy)];
-    this.reachGrid[this.idx(sx, sy)] = 1;
-    let count = 0;
-    while (queue.length) {
-      const i = queue.pop()!;
-      count++;
-      const x = i % MAP_W;
-      const y = Math.floor(i / MAP_W);
-      const neighbours = [
-        [x + 1, y],
-        [x - 1, y],
-        [x, y + 1],
-        [x, y - 1],
-      ];
-      for (const [nx, ny] of neighbours) {
-        if (nx === undefined || ny === undefined || !this.inBounds(nx, ny)) continue;
-        const ni = this.idx(nx, ny);
-        if (this.reachGrid[ni] || this.blockedGrid[ni]) continue;
-        this.reachGrid[ni] = 1;
-        queue.push(ni);
-      }
-    }
-    return count;
   }
 
   private tileCenter(x: number, y: number): { x: number; y: number } {
     return { x: x * TILE + TILE / 2, y: y * TILE + TILE / 2 };
   }
 
-  private randomReachable(center?: Clearing, minFromStart = 6): { x: number; y: number } | null {
+  private randomTile(minX: number, maxX: number): { x: number; y: number } | null {
     for (let tries = 0; tries < 200; tries++) {
-      let x = Phaser.Math.Between(3, MAP_W - 4);
-      let y = Phaser.Math.Between(3, MAP_H - 4);
-      if (center) {
-        const a = Math.random() * Math.PI * 2;
-        const r = Math.random() * center.r;
-        x = Math.round(center.x + Math.cos(a) * r);
-        y = Math.round(center.y + Math.sin(a) * r);
-      }
-      if (!this.inBounds(x, y)) continue;
+      const x = Phaser.Math.Between(minX, Math.min(maxX, MAP_W - 3));
+      const y = Phaser.Math.Between(3, MAP_H - 4);
       const i = this.idx(x, y);
-      if (!this.reachGrid[i] || this.occupied.has(i)) continue;
-      if (Phaser.Math.Distance.Between(x, y, this.startTile.x, this.startTile.y) < minFromStart) continue;
+      if (!this.pathGrid[i] || this.occupied.has(i)) continue;
+      this.occupied.add(i);
       return { x, y };
     }
     return null;
   }
 
-  /* ------------------------------------------------------------------ */
-  /* World                                                               */
-  /* ------------------------------------------------------------------ */
-
   private renderGround(): void {
-    const rt = this.add
-      .renderTexture(0, 0, WORLD_W, WORLD_H)
-      .setOrigin(0, 0)
-      .setDepth(-100);
-
+    const g = this.add.graphics().setDepth(-100);
+    g.fillStyle(C.forestDeep, 1);
+    g.fillRect(0, 0, WORLD_W, WORLD_H);
     for (let y = 0; y < MAP_H; y++) {
       for (let x = 0; x < MAP_W; x++) {
-        const i = this.idx(x, y);
-        const key = this.pathGrid[i]
-          ? `path${(x * 7 + y * 3) % 2}`
-          : `grass${(x * 5 + y * 3) % 4}`;
-        rt.draw(key, x * TILE + TILE / 2, y * TILE + TILE / 2);
+        if (!this.pathGrid[this.idx(x, y)]) continue;
+        g.fillStyle((x * 5 + y * 3) % 3 === 0 ? C.dirt : C.forest, 1);
+        g.fillRect(x * TILE, y * TILE, TILE, TILE);
       }
     }
-    rt.render();
+    // Faint centre dashes make the direction of travel unambiguous.
+    g.lineStyle(2, C.cremaDim, 0.22);
+    for (let x = 4; x < MAP_W - 4; x += 3) {
+      const c = this.tileCenter(x, this.trailY(x));
+      g.lineBetween(c.x - 9, c.y, c.x + 9, c.y);
+    }
   }
 
-  private spawnScenery(): void {
+  private spawnBlockers(): void {
     this.obstacleGroup = this.add.group();
-
-    // Merge blocked tiles into horizontal runs for fewer collision bodies.
     for (let y = 0; y < MAP_H; y++) {
       let runStart = -1;
       for (let x = 0; x <= MAP_W; x++) {
@@ -361,185 +263,119 @@ export class WoodsScene extends Phaser.Scene {
         if (blocked && runStart < 0) runStart = x;
         if (!blocked && runStart >= 0) {
           const w = (x - runStart) * TILE;
-          const cx = runStart * TILE + w / 2;
-          const cy = y * TILE + TILE / 2;
-          const zone = this.add.zone(cx, cy, w, TILE - 6);
+          const zone = this.add.zone(runStart * TILE + w / 2, y * TILE + TILE / 2, w, TILE);
           this.physics.add.existing(zone, true);
           this.obstacleGroup.add(zone);
           runStart = -1;
         }
       }
     }
+  }
 
-    // One tree (or rock) per blocked tile, sorted by y for natural overlap.
-    for (let y = 2; y < MAP_H - 2; y++) {
-      for (let x = 2; x < MAP_W - 2; x++) {
-        if (!this.blockedGrid[this.idx(x, y)]) continue;
-        const roll = Math.random();
-        const bx = x * TILE + TILE / 2;
-        const by = y * TILE + TILE;
-        const useRock = roll < 0.045;
-        const key = useRock ? 'rock' : `tree${Phaser.Math.Between(0, 2)}`;
-        const img = this.add
-          .image(bx, by, key)
-          .setOrigin(0.5, 1)
-          .setDepth(by)
-          .setScale(useRock ? 0.9 : Phaser.Math.FloatBetween(0.85, 1.12));
-        if (!useRock) img.setFlipX(Math.random() < 0.5);
-      }
-    }
+  /* ------------------------------------------------------------------ */
+  /* Labelled hitboxes                                                    */
+  /* ------------------------------------------------------------------ */
 
-    // Understory that does not block movement.
-    let deco = 0;
-    for (let y = 3; y < MAP_H - 3 && deco < 240; y++) {
-      for (let x = 3; x < MAP_W - 3 && deco < 240; x++) {
-        const i = this.idx(x, y);
-        if (!this.reachGrid[i] || this.pathGrid[i] || this.openGrid[i]) continue;
-        if (Math.random() > 0.09) continue;
-        const kind = Phaser.Math.RND.pick(['fern', 'bush', 'stump', 'fern']);
-        const bx = x * TILE + TILE / 2;
-        const by = y * TILE + TILE - 4;
-        this.add
-          .image(bx, by, kind)
-          .setOrigin(0.5, 1)
-          .setDepth(by)
-          .setScale(Phaser.Math.FloatBetween(0.7, 1));
-        deco++;
-      }
-    }
+  private makeBox(x: number, y: number, w: number, h: number, color: number, name: string): Actor {
+    const box = this.add.rectangle(x, y, w, h, color, 0.92).setStrokeStyle(2, C.ink) as Box;
+    this.physics.add.existing(box);
+    box.body.setCollideWorldBounds(true);
+    const label = this.add
+      .text(x, y - h / 2 - 16, name, mono(10, C.crema))
+      .setOrigin(0.5)
+      .setDepth(box.depth + 1);
+    return { box, label };
+  }
+
+  private moveLabel(actor: Actor): void {
+    actor.label.setPosition(actor.box.x, actor.box.y - actor.box.height / 2 - 16);
   }
 
   private createPlayer(): void {
-    const p = this.tileCenter(this.startTile.x, this.startTile.y + 1);
-    this.player = this.physics.add.sprite(p.x, p.y, 'barista').setOrigin(0.5, 1);
-    this.player.setScale(1.3);
-    this.player.setCollideWorldBounds(true);
-    this.player.body!.setSize(26, 18).setOffset(16, 52);
-    this.player.setDepth(this.player.y);
+    const c = this.tileCenter(this.start.x, this.start.y);
+    this.player = this.makeBox(c.x, c.y, 34, 48, C.mossLight, 'KNIGHT');
+    this.player.box.setDepth(c.y + 2);
+    this.player.box.body.setSize(34, 48);
+    this.player.box.body.setDrag(900, 900);
+    this.physics.add.collider(this.player.box, this.obstacleGroup);
 
-    this.glow = this.add
-      .image(p.x, p.y - 40, 'glow')
-      .setScale(1.35)
-      .setTint(0xffd39a)
-      .setAlpha(0.22)
-      .setBlendMode(Phaser.BlendModes.ADD)
-      .setDepth(940);
-
-    this.dust = this.add.particles(0, 0, 'spark', {
-      speed: { min: 8, max: 34 },
-      lifespan: 380,
-      scale: { start: 0.28, end: 0 },
-      alpha: { start: 0.28, end: 0 },
-      tint: C.dirt,
-      emitting: false,
-    });
-    this.dust.setDepth(900);
-
-    this.physics.add.collider(this.player, this.obstacleGroup);
+    this.reticle = this.add.graphics().setDepth(950);
   }
 
-  private addTrailhead(): void {
-    const p = this.tileCenter(this.startTile.x, this.startTile.y);
+  private placeMarkers(): void {
+    const s = this.tileCenter(this.start.x, this.start.y);
     this.trailhead = this.add
-      .image(p.x, p.y + 18, 'trailhead')
-      .setOrigin(0.5, 1)
-      .setDepth(p.y + 18);
+      .rectangle(s.x, s.y + 34, 120, 54, C.roast, 0.55)
+      .setStrokeStyle(2, C.gold)
+      .setDepth(s.y + 20);
     this.add
-      .image(p.x + 28, p.y - 74, 'glow')
-      .setScale(0.5)
-      .setTint(C.ember)
-      .setAlpha(0.4)
-      .setBlendMode(Phaser.BlendModes.ADD)
-      .setDepth(p.y + 17);
+      .text(s.x, s.y + 34, 'TRAILHEAD\nE · HOME', mono(10, C.crema, { align: 'center' }))
+      .setOrigin(0.5)
+      .setDepth(s.y + 21);
+
+    for (const x of [20, 44, 68, 92]) {
+      const c = this.tileCenter(x, this.trailY(x));
+      this.add
+        .text(c.x, c.y - 74, '>> DEEPER', mono(10, C.cremaFaint))
+        .setOrigin(0.5)
+        .setDepth(c.y)
+        .setAlpha(0.75);
+    }
+
+    const e = this.tileCenter(this.end.x, this.end.y);
+    this.add
+      .rectangle(e.x, e.y, 150, 84, C.plum, 0.4)
+      .setStrokeStyle(2, C.plum)
+      .setDepth(e.y);
+    this.add
+      .text(e.x, e.y - 8, 'DEEP GROVE', display(18, C.crema))
+      .setOrigin(0.5)
+      .setDepth(e.y + 1);
+    this.add
+      .text(e.x, e.y + 16, 'END OF TRAIL', mono(9, C.cremaDim))
+      .setOrigin(0.5)
+      .setDepth(e.y + 1);
   }
 
   private placeForage(): void {
-    const kinds: IngredientId[] = ['bean', 'milk', 'mushroom', 'ember', 'void'];
-    const counts = [4, 3, 3, 2, 1];
-    const away = this.clearings
-      .slice(1)
-      .sort(
-        (a, b) =>
-          Phaser.Math.Distance.Between(a.x, a.y, this.startTile.x, this.startTile.y) -
-          Phaser.Math.Distance.Between(b.x, b.y, this.startTile.x, this.startTile.y),
-      );
+    const bands: { id: IngredientId; min: number; max: number; n: number }[] = [
+      { id: 'bean', min: 9, max: 32, n: 4 },
+      { id: 'milk', min: 30, max: 54, n: 3 },
+      { id: 'mushroom', min: 52, max: 76, n: 3 },
+      { id: 'ember', min: 74, max: 98, n: 3 },
+      { id: 'void', min: 96, max: MAP_W - 5, n: 2 },
+    ];
 
-    kinds.forEach((kind, gi) => {
-      const clearing = away[gi] ?? away[away.length - 1];
-      let placed = 0;
-      for (let attempt = 0; attempt < 60 && placed < counts[gi]!; attempt++) {
-        const tile = this.randomReachable(clearing, 8);
+    bands.forEach((band) => {
+      for (let i = 0; i < band.n; i++) {
+        const tile = this.randomTile(band.min, band.max);
         if (!tile) continue;
-        this.occupied.add(this.idx(tile.x, tile.y));
-        this.addForage(kind, tile.x, tile.y);
-        placed++;
-      }
-      if (placed === 0) {
-        const tile = this.randomReachable(undefined, 8);
-        if (tile) this.addForage(kind, tile.x, tile.y);
+        const c = this.tileCenter(tile.x, tile.y);
+        const box = this.add
+          .rectangle(c.x, c.y, 36, 30, INGREDIENTS[band.id].color, 0.85)
+          .setStrokeStyle(2, C.ink)
+          .setDepth(c.y + 1);
+        const label = this.add
+          .text(c.x, c.y - 30, INGREDIENTS[band.id].name.toUpperCase(), mono(9, C.crema))
+          .setOrigin(0.5)
+          .setDepth(c.y + 2);
+        this.forage.push({ box, label, id: band.id, taken: false });
       }
     });
-  }
-
-  private addForage(id: IngredientId, tx: number, ty: number): void {
-    const c = this.tileCenter(tx, ty);
-    const sprite = this.add
-      .image(c.x, c.y + 6, `forage-${id}`)
-      .setOrigin(0.5, 1)
-      .setDepth(c.y + 6);
-    const glow = this.add
-      .image(c.x, c.y - 18, 'glow')
-      .setScale(0.25)
-      .setTint(INGREDIENTS[id].color)
-      .setAlpha(0.38)
-      .setBlendMode(Phaser.BlendModes.ADD)
-      .setDepth(c.y + 5);
-
-    if (!reducedMotion()) {
-      this.tweens.add({
-        targets: glow,
-        alpha: { from: 0.24, to: 0.5 },
-        scale: { from: 0.22, to: 0.3 },
-        duration: Phaser.Math.Between(1200, 1900),
-        yoyo: true,
-        repeat: -1,
-        ease: 'Sine.inOut',
-        delay: Phaser.Math.Between(0, 900),
-      });
-      this.tweens.add({
-        targets: sprite,
-        y: c.y + 2,
-        duration: Phaser.Math.Between(1500, 2200),
-        yoyo: true,
-        repeat: -1,
-        ease: 'Sine.inOut',
-      });
-    }
-
-    this.forage.push({ sprite, glow, id, taken: false });
   }
 
   private spawnEnemies(): void {
     this.crawlerGroup = this.physics.add.group();
 
-    const plan: { kind: EnemyKind; clearing?: Clearing; nearStart?: boolean }[] = [];
-    this.clearings.slice(1).forEach((c) => {
-      plan.push({ kind: 'slime', clearing: c });
-      plan.push({ kind: 'moth', clearing: c });
-    });
-    plan.push({ kind: 'slime', nearStart: true });
-    plan.push({ kind: 'moth', nearStart: true });
-
-    const farthest = this.clearings[this.clearings.length - 1]!;
-
-    plan.forEach((entry) => {
-      const tile = this.randomReachable(entry.clearing, entry.nearStart ? 12 : 9);
-      if (!tile) return;
-      this.occupied.add(this.idx(tile.x, tile.y));
-      this.spawnEnemy(entry.kind, tile.x, tile.y);
-    });
-
-    const elderTile = this.randomReachable(farthest, 12);
+    for (let x = 24; x < END_X - 8; x += 16) {
+      const tile = this.randomTile(x - 4, x + 4);
+      if (tile) this.spawnEnemy('slime', tile.x, tile.y);
+    }
+    for (let x = 36; x < END_X - 12; x += 26) {
+      const tile = this.randomTile(x - 4, x + 4);
+      if (tile) this.spawnEnemy('moth', tile.x, tile.y);
+    }
+    const elderTile = this.randomTile(END_X - 12, END_X - 4);
     if (elderTile) this.spawnEnemy('elder', elderTile.x, elderTile.y);
 
     this.physics.add.collider(this.crawlerGroup, this.obstacleGroup);
@@ -547,69 +383,47 @@ export class WoodsScene extends Phaser.Scene {
 
   private spawnEnemy(kind: EnemyKind, tx: number, ty: number): void {
     const c = this.tileCenter(tx, ty);
-    const key = kind === 'moth' ? 'moth' : kind === 'elder' ? 'elder-slime' : 'slime-forest';
-    const sprite = this.physics.add.sprite(c.x, c.y, key).setOrigin(0.5, kind === 'moth' ? 0.6 : 1);
-    sprite.setDepth(c.y);
-    sprite.setCollideWorldBounds(true);
+    const size = kind === 'elder' ? [72, 44] : kind === 'moth' ? [32, 24] : [44, 28];
+    const tint = kind === 'elder' ? C.mossDark : kind === 'moth' ? C.moon : C.mossMid;
+    const name = kind === 'elder' ? 'ELDER' : kind.toUpperCase();
+    const actor = this.makeBox(c.x, c.y, size[0]!, size[1]!, tint, name);
+    actor.box.setDepth(c.y + 1);
 
-    const scale = kind === 'elder' ? 1.15 : kind === 'moth' ? 1 : 1.1;
-    sprite.setScale(scale);
-
-    const body = sprite.body as Phaser.Physics.Arcade.Body;
-    if (kind === 'moth') {
-      body.setSize(18, 14).setOffset(9, 8);
-      body.setAllowGravity(false);
-    } else {
-      body.setSize(30, 14).setOffset(8, kind === 'elder' ? 58 : 22);
-      body.setDrag(220, 220);
-      if (kind === 'elder') {
-        body.setSize(56, 20).setOffset(18, 54);
-        sprite.setImmovable(false);
-      }
-      this.crawlerGroup.add(sprite);
+    if (kind === 'moth') actor.box.body.setAllowGravity(false);
+    else {
+      actor.box.body.setDrag(320, 320);
+      this.crawlerGroup.add(actor.box);
     }
 
-    this.enemies.push({
-      sprite,
+    const hp = kind === 'elder' ? 8 : kind === 'moth' ? 1 : 2;
+    const enemy: Enemy = {
+      ...actor,
       kind,
-      hp: kind === 'elder' ? 8 : kind === 'moth' ? 1 : 2,
-      speed: kind === 'elder' ? 42 : kind === 'moth' ? 82 : 58,
-      radius: kind === 'elder' ? 46 : 22,
+      hp,
+      speed: kind === 'elder' ? 44 : kind === 'moth' ? 82 : 58,
+      radius: kind === 'elder' ? 44 : 22,
       nextHop: 0,
       wobble: Math.random() * Math.PI * 2,
       dead: false,
-    });
+    };
+    this.enemies.push(enemy);
   }
 
   private createAtmosphere(): void {
-    // Fireflies scattered through the wood.
-    for (let i = 0; i < 46; i++) {
+    // A few sparks to keep the dark legible; no sprite art involved.
+    for (let i = 0; i < 40; i++) {
       const x = Phaser.Math.Between(TILE * 3, WORLD_W - TILE * 3);
       const y = Phaser.Math.Between(TILE * 3, WORLD_H - TILE * 3);
-      const fly = this.add
-        .image(x, y, 'spark')
-        .setTint(Math.random() < 0.5 ? C.gold : C.moon)
-        .setScale(Phaser.Math.FloatBetween(0.25, 0.6))
-        .setAlpha(0)
-        .setBlendMode(Phaser.BlendModes.ADD)
+      const dot = this.add
+        .rectangle(x, y, 3, 3, Math.random() < 0.5 ? C.gold : C.moon, 0.5)
         .setDepth(800);
       this.tweens.add({
-        targets: fly,
-        alpha: { from: 0, to: Phaser.Math.FloatBetween(0.35, 0.8) },
+        targets: dot,
+        alpha: { from: 0.1, to: 0.7 },
         duration: Phaser.Math.Between(1600, 3200),
         yoyo: true,
         repeat: -1,
-        delay: Phaser.Math.Between(0, 4000),
-        ease: 'Sine.inOut',
-      });
-      this.tweens.add({
-        targets: fly,
-        x: x + Phaser.Math.Between(-60, 60),
-        y: y + Phaser.Math.Between(-50, 50),
-        duration: Phaser.Math.Between(4000, 9000),
-        yoyo: true,
-        repeat: -1,
-        ease: 'Sine.inOut',
+        delay: Phaser.Math.Between(0, 3000),
       });
     }
 
@@ -618,82 +432,89 @@ export class WoodsScene extends Phaser.Scene {
       .setOrigin(0)
       .setScrollFactor(0)
       .setDepth(900)
-      .setAlpha(0.86);
-
-    this.add
-      .tileSprite(0, 0, GAME_WIDTH, GAME_HEIGHT, 'grain')
-      .setOrigin(0)
-      .setScrollFactor(0)
-      .setDepth(960)
-      .setAlpha(0.35);
+      .setAlpha(0.8);
   }
 
   /* ------------------------------------------------------------------ */
-  /* HUD                                                                 */
+  /* HUD                                                                  */
   /* ------------------------------------------------------------------ */
 
   private buildHud(): void {
     this.hud = this.add.container(0, 0).setScrollFactor(0).setDepth(1000);
 
-    const eyebrow = this.add.text(28, 24, 'THE WHISPERING WOODS', mono(10, C.cremaFaint));
-    eyebrow.setAlpha(0.9);
-    this.hud.add(eyebrow);
+    this.hud.add(this.add.text(28, 20, 'THE WHISPERING WOODS', mono(10, C.cremaFaint)));
+    this.hud.add(this.add.text(28, 36, 'Night forage', display(24, C.crema, { fontStyle: '600' })));
 
-    const title = this.add.text(28, 38, 'Night forage', display(26, C.crema, { fontStyle: '600' }));
-    this.hud.add(title);
+    this.hpText = this.add.text(28, 70, '', mono(13, C.blood));
+    this.hud.add(this.hpText);
 
-    for (let i = 0; i < this.maxHp; i++) {
-      const heart = this.add.image(32 + i * 30, 92, 'heart').setOrigin(0, 0.5);
-      this.hearts.push(heart);
-      this.hud.add(heart);
+    // Thermos slots: visible stubs for drinks equipped during the day shift.
+    for (let i = 0; i < 3; i++) {
+      const x = 28 + i * 112;
+      const slot = this.add.graphics();
+      slot.fillStyle(C.inkSoft, 0.9);
+      slot.fillRoundedRect(x, 96, 104, 40, 4);
+      slot.lineStyle(1, C.line, 1);
+      slot.strokeRoundedRect(x + 0.5, 96.5, 103, 39, 4);
+      this.hud.add(slot);
+      this.hud.add(this.add.text(x + 8, 102, `THERMOS ${i + 1}`, mono(9, C.cremaFaint)));
+      this.hud.add(this.add.text(x + 8, 116, 'empty — dusk', mono(9, C.cremaDim)));
     }
 
-    this.coinText = this.add.text(30, 116, '', mono(12, C.ember));
-    this.hud.add(this.coinText);
+    this.timerText = this.add
+      .text(GAME_WIDTH / 2, 20, '', display(32, C.crema, { fontStyle: '600' }))
+      .setOrigin(0.5, 0);
+    this.hud.add(this.timerText);
+    this.hud.add(
+      this.add
+        .text(GAME_WIDTH / 2, 58, 'TIME UNTIL YOU FALL ASLEEP', mono(9, C.cremaFaint))
+        .setOrigin(0.5, 0),
+    );
+    this.progress = progressBar(this, GAME_WIDTH / 2 - 160, 76, 320, 8, C.gold);
+    this.hud.add([this.progress.bg, this.progress.fill]);
+    this.distanceText = this.add
+      .text(GAME_WIDTH / 2, 92, '', mono(10, C.cremaDim))
+      .setOrigin(0.5, 0);
+    this.hud.add(this.distanceText);
 
-    // Haul chips, right aligned.
-    const chipW = 86;
-    INGREDIENT_ORDER.forEach((id, i) => {
-      const x = GAME_WIDTH - 28 - (INGREDIENT_ORDER.length - i) * chipW;
-      const icon = this.add.image(x, 42, `ico-${id}`).setOrigin(0, 0.5).setScale(0.85);
-      icon.setAlpha(0.95);
-      const label = this.add
-        .text(x + 28, 42, '0', mono(12, C.cremaDim))
-        .setOrigin(0, 0.5);
-      this.hud.add([icon, label]);
-      this.haulTexts[id] = label;
-    });
-
-    this.add
-      .text(GAME_WIDTH - 28, 68, 'SATCHEL', mono(9, C.cremaFaint))
-      .setOrigin(1, 0.5)
-      .setScrollFactor(0)
-      .setDepth(1000);
+    this.hud.add(this.add.text(GAME_WIDTH - 28, 22, 'SATCHEL', mono(9, C.cremaFaint)).setOrigin(1, 0));
+    this.satchelText = this.add
+      .text(GAME_WIDTH - 28, 38, '', mono(11, C.cremaDim, { align: 'right' }))
+      .setOrigin(1, 0);
+    this.hud.add(this.satchelText);
 
     this.hintText = this.add
-      .text(GAME_WIDTH / 2, GAME_HEIGHT - 40, '', mono(12, C.cremaDim))
+      .text(GAME_WIDTH / 2, GAME_HEIGHT - 38, '', mono(12, C.cremaDim))
       .setOrigin(0.5)
       .setScrollFactor(0)
       .setDepth(1000);
   }
 
+  private progressValue(): number {
+    return Phaser.Math.Clamp((this.player.box.x - this.start.x * TILE) / ((this.end.x - this.start.x) * TILE), 0, 1);
+  }
+
   private updateHud(): void {
-    this.hearts.forEach((h, i) => h.setTexture(i < this.hp ? 'heart' : 'heart-empty'));
-    INGREDIENT_ORDER.forEach((id) => {
-      this.haulTexts[id]?.setText(String(this.stats.haul[id] ?? 0));
-    });
-    this.coinText.setText(`${this.stats.coins} coins found`);
+    this.hpText.setText(`HEALTH  ${'■'.repeat(this.hp)}${'□'.repeat(Math.max(0, this.maxHp - this.hp))}`);
+    this.timerText.setText(clock(this.timeLeft));
+    this.timerText.setColor(css(this.timeLeft <= 30 ? C.blood : C.crema));
+    this.progress.set(this.progressValue());
+    this.distanceText.setText(`DEEP GROVE →  ${Math.round((1 - this.progressValue()) * 100)}% TO GO`);
+
+    this.satchelText.setText(
+      INGREDIENT_ORDER.map((id) => `${INGREDIENTS[id].name.split(' ')[0]!.toUpperCase()} ${this.stats.haul[id] ?? 0}`).join('  ·  '),
+    );
   }
 
   private introToast(): void {
     if (this.over) return;
     const panel = this.add.graphics();
-    inkPanel(panel, 660, 64, { fill: C.inkSoft, stroke: C.line, radius: 4, alpha: 0.9 });
+    inkPanel(panel, 700, 62, { fill: C.inkSoft, stroke: C.line, radius: 4, alpha: 0.9 });
     const text = this.add
-      .text(330, 32, 'Forage the groves. The lantern at the trailhead is your way home.', mono(12.5, C.crema))
+      .text(350, 31, 'Follow the trail east. Aim with the mouse; E at the lantern takes you home.', mono(12.5, C.crema))
       .setOrigin(0.5);
     const box = this.add
-      .container(GAME_WIDTH / 2 - 330, 150, [panel, text])
+      .container(GAME_WIDTH / 2 - 350, 148, [panel, text])
       .setScrollFactor(0)
       .setDepth(1001);
     if (reducedMotion()) {
@@ -701,18 +522,12 @@ export class WoodsScene extends Phaser.Scene {
       return;
     }
     box.setAlpha(0);
-    this.tweens.add({ targets: box, alpha: 1, y: 156, duration: 400, ease: 'Cubic.out' });
-    this.tweens.add({
-      targets: box,
-      alpha: 0,
-      delay: 5200,
-      duration: 700,
-      onComplete: () => box.destroy(),
-    });
+    this.tweens.add({ targets: box, alpha: 1, y: 154, duration: 400, ease: 'Cubic.out' });
+    this.tweens.add({ targets: box, alpha: 0, delay: 5200, duration: 700, onComplete: () => box.destroy() });
   }
 
   /* ------------------------------------------------------------------ */
-  /* Input                                                               */
+  /* Input                                                                */
   /* ------------------------------------------------------------------ */
 
   private bindInput(): void {
@@ -721,7 +536,6 @@ export class WoodsScene extends Phaser.Scene {
       'W' | 'A' | 'S' | 'D' | 'E',
       Phaser.Input.Keyboard.Key
     >;
-
     this.input.keyboard?.on('keydown-SPACE', () => this.attack());
     this.input.keyboard?.on('keydown-E', () => this.tryLeave());
     this.input.keyboard?.on('keydown-ESC', () => this.togglePause());
@@ -731,123 +545,130 @@ export class WoodsScene extends Phaser.Scene {
     });
   }
 
+  private aimAngle(): number {
+    const p = this.input.activePointer;
+    const world = this.cameras.main.getWorldPoint(p.x, p.y);
+    return Math.atan2(world.y - this.player.box.y, world.x - this.player.box.x);
+  }
+
+  private drawReticle(): void {
+    if (!this.reticle) return;
+    this.reticle.clear();
+    if (this.over || this.paused) return;
+    const p = this.input.activePointer;
+    const w = this.cameras.main.getWorldPoint(p.x, p.y);
+    this.reticle.lineStyle(1.5, C.gold, 0.85);
+    this.reticle.strokeCircle(w.x, w.y, 9);
+    this.reticle.lineBetween(w.x - 16, w.y, w.x - 5, w.y);
+    this.reticle.lineBetween(w.x + 5, w.y, w.x + 16, w.y);
+    this.reticle.lineBetween(w.x, w.y - 16, w.x, w.y - 5);
+    this.reticle.lineBetween(w.x, w.y + 5, w.x, w.y + 16);
+  }
+
   /* ------------------------------------------------------------------ */
-  /* Loop                                                                */
+  /* Loop                                                                 */
   /* ------------------------------------------------------------------ */
 
   update(time: number, delta: number): void {
     if (!this.player || this.over || this.paused) return;
 
     if (!this.dying) {
-      const left = this.keys.A.isDown || this.cursors.left.isDown;
-      const right = this.keys.D.isDown || this.cursors.right.isDown;
-      const up = this.keys.W.isDown || this.cursors.up.isDown;
-      const down = this.keys.S.isDown || this.cursors.down.isDown;
-
-      let vx = (right ? 1 : 0) - (left ? 1 : 0);
-      let vy = (down ? 1 : 0) - (up ? 1 : 0);
-      const len = Math.hypot(vx, vy);
-      if (len > 0) {
-        vx = (vx / len) * PLAYER_SPEED;
-        vy = (vy / len) * PLAYER_SPEED;
-        this.facing = Math.atan2(vy, vx);
-        this.player.setFlipX(vx < -5);
-        if (time - this.lastDustAt > 150) {
-          this.lastDustAt = time;
-          this.dust.emitParticleAt(this.player.x, this.player.y - 2, 1);
-        }
-      }
-
-      if (time < this.knockbackUntil) {
-        // knockback owns the velocity for a beat
+      this.timeLeft = Math.max(0, this.timeLeft - delta / 1000);
+      if (this.timeLeft <= 0) {
+        this.fallAsleep();
       } else {
-        this.player.setVelocity(vx, vy);
+        this.movePlayer(time);
+        this.updateEnemies(time);
+        this.updateForage();
       }
-      this.player.setDepth(this.player.y);
-      this.glow.setPosition(this.player.x, this.player.y - 40);
-
-      // invulnerability blink
-      this.player.setAlpha(time < this.invulnUntil && Math.floor(time / 90) % 2 === 0 ? 0.45 : 1);
     }
 
-    this.updateEnemies(time);
-    this.updateForage();
+    this.moveLabel(this.player);
+    this.enemies.forEach((e) => {
+      if (!e.dead) this.moveLabel(e);
+    });
+    this.aim = this.aimAngle();
+    this.drawReticle();
     this.updateHint();
+    this.updateHud();
 
+    if (this.timeLeft <= 30 && !this.over && Math.floor(time / 400) % 2 === 0) {
+      this.timerText.setAlpha(0.55);
+    } else {
+      this.timerText.setAlpha(1);
+    }
     if (!this.dying && this.hp <= 0) this.die();
-    void delta;
+  }
+
+  private movePlayer(time: number): void {
+    const left = this.keys.A.isDown || this.cursors.left.isDown;
+    const right = this.keys.D.isDown || this.cursors.right.isDown;
+    const up = this.keys.W.isDown || this.cursors.up.isDown;
+    const down = this.keys.S.isDown || this.cursors.down.isDown;
+
+    let vx = (right ? 1 : 0) - (left ? 1 : 0);
+    let vy = (down ? 1 : 0) - (up ? 1 : 0);
+    const len = Math.hypot(vx, vy);
+    if (len > 0) {
+      vx = (vx / len) * PLAYER_SPEED;
+      vy = (vy / len) * PLAYER_SPEED;
+    }
+
+    if (time >= this.knockbackUntil) this.player.box.body.setVelocity(vx, vy);
+    this.player.box.setDepth(this.player.box.y + 2);
+    this.player.box.setFillStyle(
+      time < this.invulnUntil && Math.floor(time / 90) % 2 === 0 ? C.crema : C.mossLight,
+      0.92,
+    );
   }
 
   private updateEnemies(time: number): void {
-    const px = this.player.x;
-    const py = this.player.y - 24;
+    const px = this.player.box.x;
+    const py = this.player.box.y;
 
     for (const e of this.enemies) {
       if (e.dead) continue;
-      const sprite = e.sprite;
-      sprite.setDepth(sprite.y);
-      const dx = px - sprite.x;
-      const dy = py - sprite.y;
+      const b = e.box.body;
+      e.box.setDepth(e.box.y + 1);
+      const dx = px - e.box.x;
+      const dy = py - e.box.y;
       const dist = Math.hypot(dx, dy);
-
-      // Only nearby creatures notice the lantern. Without a leash they all
-      // converge on the player at once and the woods stop feeling like woods.
-      const aggro = dist < (e.kind === 'elder' ? 340 : 270);
+      const aggro = dist < (e.kind === 'elder' ? 330 : 260);
 
       if (e.kind === 'moth') {
-        const angle = aggro
-          ? Math.atan2(dy, dx) + Math.sin(time * 0.004 + e.wobble) * 0.9
-          : time * 0.0005 + e.wobble;
-        sprite.setVelocity(Math.cos(angle) * (aggro ? e.speed : 24), Math.sin(angle) * (aggro ? e.speed : 24));
-        sprite.setAngle(Math.sin(time * 0.012 + e.wobble) * 10);
+        const angle = aggro ? Math.atan2(dy, dx) + Math.sin(time * 0.004 + e.wobble) * 0.8 : time * 0.0005 + e.wobble;
+        b.setVelocity(Math.cos(angle) * (aggro ? e.speed : 24), Math.sin(angle) * (aggro ? e.speed : 24));
       } else if (time > e.nextHop) {
-        const angle = aggro
-          ? Math.atan2(dy, dx) + Phaser.Math.FloatBetween(-0.45, 0.45)
-          : time * 0.0003 + e.wobble;
-        sprite.setVelocity(Math.cos(angle) * (aggro ? e.speed : 14), Math.sin(angle) * (aggro ? e.speed : 14));
+        const angle = aggro ? Math.atan2(dy, dx) + Phaser.Math.FloatBetween(-0.4, 0.4) : time * 0.0003 + e.wobble;
+        b.setVelocity(Math.cos(angle) * (aggro ? e.speed : 14), Math.sin(angle) * (aggro ? e.speed : 14));
         e.nextHop = time + Phaser.Math.Between(700, 1300);
-        const squash = e.kind === 'elder' ? 1.15 : 1.1;
-        this.tweens.add({
-          targets: sprite,
-          scaleY: squash * 1.08,
-          scaleX: squash * 0.94,
-          duration: 110,
-          yoyo: true,
-        });
       }
 
-      if (this.dying) continue;
-      const hurtDist = e.radius + 26;
-      if (dist < hurtDist && time > this.invulnUntil) {
-        this.hurtPlayer(1, sprite.x, sprite.y);
+      if (!this.dying && dist < e.radius + 20 && time > this.invulnUntil) {
+        this.hurtPlayer(e.box.x, e.box.y);
       }
     }
   }
 
   private updateForage(): void {
-    const now = this.time.now;
     for (const f of this.forage) {
       if (f.taken) continue;
-      if (Phaser.Math.Distance.Between(this.player.x, this.player.y, f.sprite.x, f.sprite.y) > 46) continue;
+      if (Phaser.Math.Distance.Between(this.player.box.x, this.player.box.y, f.box.x, f.box.y) > 42) continue;
       f.taken = true;
       this.stats.haul[f.id] = (this.stats.haul[f.id] ?? 0) + 1;
-      this.updateHud();
       sfx.pickup();
-      this.burst(f.sprite.x, f.sprite.y - 20, INGREDIENTS[f.id].color, 8);
-      this.float(f.sprite.x, f.sprite.y - 30, `+1 ${INGREDIENTS[f.id].name}`, INGREDIENTS[f.id].color);
-      f.glow.destroy();
-      f.sprite.destroy();
-      void now;
+      this.float(f.box.x, f.box.y - 24, `+1 ${INGREDIENTS[f.id].name}`, INGREDIENTS[f.id].color);
+      f.box.destroy();
+      f.label.destroy();
     }
   }
 
   private updateHint(): void {
-    const nearTrail =
-      Phaser.Math.Distance.Between(this.player.x, this.player.y, this.trailhead.x, this.trailhead.y) < 130;
+    const nearHome = Phaser.Math.Distance.Between(this.player.box.x, this.player.box.y, this.trailhead.x, this.trailhead.y) < 120;
     let hint = '';
     if (this.dying) hint = '';
-    else if (nearTrail) hint = 'E — head home with the haul';
-    else if (this.time.now - this.startedAt < 16000) hint = 'WASD move  ·  SPACE swing  ·  ESC pause';
+    else if (nearHome) hint = 'E — head home with the haul';
+    else if (this.timeLeft > RUN_SECONDS - 16) hint = 'WASD move  ·  CLICK to swing toward the mouse  ·  ESC pause';
     if (hint !== this.lastHint) {
       this.lastHint = hint;
       this.hintText.setText(hint);
@@ -855,7 +676,7 @@ export class WoodsScene extends Phaser.Scene {
   }
 
   /* ------------------------------------------------------------------ */
-  /* Combat                                                              */
+  /* Combat                                                               */
   /* ------------------------------------------------------------------ */
 
   private attack(): void {
@@ -863,24 +684,25 @@ export class WoodsScene extends Phaser.Scene {
     const now = this.time.now;
     if (now < this.attackReadyAt) return;
     this.attackReadyAt = now + ATTACK_COOLDOWN;
+    this.aim = this.aimAngle();
     sfx.swing();
 
-    const g = this.add
-      .graphics({ x: this.player.x, y: this.player.y - 32 })
-      .setDepth(this.player.y + 1);
+    const px = this.player.box.x;
+    const py = this.player.box.y;
+    const g = this.add.graphics().setDepth(py + 2);
     g.lineStyle(9, 0xfff4dc, 0.85);
     g.beginPath();
-    g.arc(0, 0, 46, this.facing - 1.0, this.facing + 1.0);
+    g.arc(px, py, 46, this.aim - 1.0, this.aim + 1.0);
     g.strokePath();
     g.lineStyle(2, C.gold, 0.9);
     g.beginPath();
-    g.arc(0, 0, 54, this.facing - 1.05, this.facing + 1.05);
+    g.arc(px, py, 56, this.aim - 1.05, this.aim + 1.05);
     g.strokePath();
     this.tweens.add({
       targets: g,
       alpha: 0,
-      scaleX: 1.3,
-      scaleY: 1.3,
+      scaleX: 1.25,
+      scaleY: 1.25,
       duration: 200,
       ease: 'Cubic.out',
       onComplete: () => g.destroy(),
@@ -888,103 +710,98 @@ export class WoodsScene extends Phaser.Scene {
 
     for (const e of this.enemies) {
       if (e.dead) continue;
-      const dx = e.sprite.x - this.player.x;
-      const dy = e.sprite.y - 20 - (this.player.y - 32);
+      const dx = e.box.x - px;
+      const dy = e.box.y - py;
       const dist = Math.hypot(dx, dy);
       if (dist > ATTACK_RANGE + e.radius) continue;
-      const diff = Phaser.Math.Angle.Wrap(Math.atan2(dy, dx) - this.facing);
+      const diff = Phaser.Math.Angle.Wrap(Math.atan2(dy, dx) - this.aim);
       if (Math.abs(diff) > ATTACK_ARC) continue;
-      this.hurtEnemy(e, 1);
+      this.hurtEnemy(e);
     }
   }
 
-  private hurtEnemy(e: Enemy, amount: number): void {
+  private hurtEnemy(e: Enemy): void {
     if (e.dead) return;
-    e.hp -= amount;
+    e.hp -= 1;
     sfx.hit();
-    e.sprite.setTint(0xffffff);
+    e.box.setFillStyle(C.crema, 1);
     this.time.delayedCall(90, () => {
-      if (e.sprite.active) e.sprite.clearTint();
+      if (e.box.active) e.box.setFillStyle(e.kind === 'elder' ? C.mossDark : e.kind === 'moth' ? C.moon : C.mossMid, 0.92);
     });
-    this.burst(e.sprite.x, e.sprite.y - 18, C.mossLight, 5);
 
-    const away = Math.atan2(e.sprite.y - this.player.y, e.sprite.x - this.player.x);
+    const away = Math.atan2(e.box.y - this.player.box.y, e.box.x - this.player.box.x);
     const kb = e.kind === 'elder' ? 90 : 200;
-    e.sprite.setVelocity(Math.cos(away) * kb, Math.sin(away) * kb);
+    e.box.body.setVelocity(Math.cos(away) * kb, Math.sin(away) * kb);
+    e.label.setText(e.hp > 0 ? `${e.kind.toUpperCase()} ${e.hp}` : e.kind.toUpperCase());
 
     if (e.hp > 0) return;
-
     e.dead = true;
     this.stats.kills++;
-    sfx.hit();
-    this.burst(e.sprite.x, e.sprite.y - 20, C.mossMid, 14);
+    this.float(e.box.x, e.box.y - 26, 'FELLED', C.mossLight);
     this.cameras.main.shake(90, 0.004);
-    this.float(e.sprite.x, e.sprite.y - 34, 'felled', C.mossLight);
 
-    if (Math.random() < 0.34) {
-      this.stats.coins += e.kind === 'elder' ? 12 : Phaser.Math.Between(2, 5);
-    }
+    if (Math.random() < 0.34) this.stats.coins += e.kind === 'elder' ? 12 : Phaser.Math.Between(2, 5);
     const drops = e.kind === 'elder' ? 3 : Math.random() < 0.22 ? 1 : 0;
     for (let i = 0; i < drops; i++) {
-      const tile = {
-        x: Phaser.Math.Clamp(Math.floor(e.sprite.x / TILE) + Phaser.Math.Between(-1, 1), 2, MAP_W - 3),
-        y: Phaser.Math.Clamp(Math.floor(e.sprite.y / TILE) + Phaser.Math.Between(-1, 1), 2, MAP_H - 3),
-      };
-      this.addForage(rollIngredient(2, 0.2), tile.x, tile.y);
+      const tx = Phaser.Math.Clamp(Math.floor(e.box.x / TILE) + Phaser.Math.Between(-1, 1), 3, MAP_W - 4);
+      const ty = Phaser.Math.Clamp(Math.floor(e.box.y / TILE) + Phaser.Math.Between(-1, 1), 3, MAP_H - 4);
+      if (!this.pathGrid[this.idx(tx, ty)]) continue;
+      const c = this.tileCenter(tx, ty);
+      const id = rollIngredient(2, 0.2);
+      const box = this.add
+        .rectangle(c.x, c.y, 30, 26, INGREDIENTS[id].color, 0.85)
+        .setStrokeStyle(2, C.ink)
+        .setDepth(c.y + 1);
+      const label = this.add
+        .text(c.x, c.y - 26, INGREDIENTS[id].name.toUpperCase(), mono(9, C.crema))
+        .setOrigin(0.5)
+        .setDepth(c.y + 2);
+      this.forage.push({ box, label, id, taken: false });
     }
 
-    this.updateHud();
-    e.sprite.destroy();
+    e.label.destroy();
+    e.box.destroy();
   }
 
-  private hurtPlayer(amount: number, fromX: number, fromY: number): void {
+  private hurtPlayer(fromX: number, fromY: number): void {
     if (this.dying || this.over || this.time.now < this.invulnUntil) return;
-    this.hp -= amount;
-    this.invulnUntil = this.time.now + 1200;
+    this.hp -= 1;
+    this.invulnUntil = this.time.now + INVULN_MS;
     this.knockbackUntil = this.time.now + 150;
     sfx.hurt();
     this.cameras.main.shake(160, 0.009);
-    this.flashScreen();
 
-    const away = Math.atan2(this.player.y - fromY, this.player.x - fromX);
-    this.player.setVelocity(Math.cos(away) * 300, Math.sin(away) * 300);
-    this.updateHud();
+    const away = Math.atan2(this.player.box.y - fromY, this.player.box.x - fromX);
+    this.player.box.body.setVelocity(Math.cos(away) * 300, Math.sin(away) * 300);
   }
 
   private die(): void {
     if (this.dying) return;
     this.dying = true;
-    this.player.setVelocity(0, 0);
-    const body = this.player.body as Phaser.Physics.Arcade.Body;
-    body.enable = false;
+    this.cause = 'death';
+    this.player.box.body.setVelocity(0, 0);
+    this.player.box.body.enable = false;
     sfx.death();
-    this.cameras.main.shake(420, 0.014);
-    this.showFloat('The woods take their share…', C.blood, 30, 1.4);
-    this.time.delayedCall(1100, () => this.finishRun(true));
+    this.cameras.main.shake(380, 0.012);
+    this.float(this.player.box.x, this.player.box.y - 40, 'The woods take their share…', C.blood);
+    this.time.delayedCall(900, () => this.finishRun());
   }
 
-  /* ------------------------------------------------------------------ */
-  /* Feedback                                                            */
-  /* ------------------------------------------------------------------ */
-
-  private burst(x: number, y: number, tint: number, count: number): void {
-    const p = this.add.particles(x, y, 'spark', {
-      speed: { min: 40, max: 150 },
-      lifespan: { min: 220, max: 480 },
-      scale: { start: 0.7, end: 0 },
-      alpha: { start: 0.9, end: 0 },
-      tint,
-      emitting: false,
-    });
-    p.setDepth(y + 40);
-    p.explode(count);
-    this.time.delayedCall(700, () => p.destroy());
+  private fallAsleep(): void {
+    if (this.dying) return;
+    this.dying = true;
+    this.cause = 'sleep';
+    this.player.box.body.setVelocity(0, 0);
+    this.player.box.body.enable = false;
+    sfx.candleOut();
+    this.float(this.player.box.x, this.player.box.y - 40, 'The lantern gutters…', C.blood);
+    this.time.delayedCall(900, () => this.finishRun());
   }
 
   private float(x: number, y: number, message: string, color: number): void {
     const t = this.add
       .text(x, y, message, {
-        ...display(17, color, { fontStyle: '600' }),
+        ...display(15, color, { fontStyle: '600' }),
         stroke: css(C.ink),
         strokeThickness: 4,
       })
@@ -1000,60 +817,34 @@ export class WoodsScene extends Phaser.Scene {
     });
   }
 
-  private showFloat(message: string, color: number, size: number, hold: number): void {
-    const t = this.add
-      .text(GAME_WIDTH / 2, 260, message, {
-        ...display(size, color, { fontStyle: '600' }),
-        stroke: css(C.ink),
-        strokeThickness: 5,
-      })
-      .setOrigin(0.5)
-      .setScrollFactor(0)
-      .setDepth(1002);
-    this.tweens.add({ targets: t, alpha: 0, delay: 700, duration: 500 });
-    this.time.delayedCall(hold * 1000, () => t.destroy());
-  }
-
-  private flashScreen(): void {
-    const rect = this.add
-      .rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, C.blood, 0.3)
-      .setOrigin(0)
-      .setScrollFactor(0)
-      .setDepth(955);
-    this.tweens.add({ targets: rect, alpha: 0, duration: 320, onComplete: () => rect.destroy() });
-  }
-
   /* ------------------------------------------------------------------ */
-  /* Leaving                                                             */
+  /* Ending                                                               */
   /* ------------------------------------------------------------------ */
 
   private tryLeave(): void {
     if (this.over || this.paused || this.dying) return;
-    const d = Phaser.Math.Distance.Between(this.player.x, this.player.y, this.trailhead.x, this.trailhead.y);
+    const d = Phaser.Math.Distance.Between(this.player.box.x, this.player.box.y, this.trailhead.x, this.trailhead.y);
     if (d > 130) {
-      this.showFloat('The trailhead lantern is back the way you came.', C.cremaDim, 16, 1.2);
+      this.float(this.player.box.x, this.player.box.y - 36, 'The trailhead is back the way you came.', C.cremaDim);
       return;
     }
     sfx.dawn();
-    this.finishRun(false);
+    this.finishRun();
   }
 
-  private finishRun(died: boolean): void {
+  private finishRun(): void {
     if (this.over) return;
     this.over = true;
     this.physics.pause();
-    this.player.setVelocity(0, 0);
+    this.player.box.body.setVelocity(0, 0);
 
+    const lostHalf = this.cause !== 'home';
     const kept = this.emptyHaul();
     const lost = this.emptyHaul();
     INGREDIENT_ORDER.forEach((id) => {
       const n = this.stats.haul[id] ?? 0;
-      if (died) {
-        kept[id] = Math.floor(n / 2);
-        lost[id] = n - kept[id]!;
-      } else {
-        kept[id] = n;
-      }
+      kept[id] = lostHalf ? Math.floor(n / 2) : n;
+      lost[id] = n - kept[id]!;
     });
 
     INGREDIENT_ORDER.forEach((id) => {
@@ -1064,14 +855,36 @@ export class WoodsScene extends Phaser.Scene {
     meta.lifetime.coinsEarned += this.stats.coins;
     saveMeta(meta);
 
-    this.showSummary(died, kept, lost);
+    this.showSummary(kept, lost);
   }
 
-  private showSummary(died: boolean, kept: Record<IngredientId, number>, lost: Record<IngredientId, number>): void {
+  private showSummary(kept: Record<IngredientId, number>, lost: Record<IngredientId, number>): void {
     const w = 720;
     const h = 470;
     const x = GAME_WIDTH / 2 - w / 2;
     const y = GAME_HEIGHT / 2 - h / 2;
+    const safe = this.cause === 'home';
+
+    const copy = {
+      home: {
+        eyebrow: 'THE TRAILHEAD · SAFE',
+        title: 'Home with the haul',
+        blurb: 'The lantern found you first. The satchel comes home full.',
+        color: C.mossLight,
+      },
+      death: {
+        eyebrow: 'THE TRAILHEAD · INJURED',
+        title: 'You wake on the path',
+        blurb: 'The woods took their share, and half the satchel with it.',
+        color: C.blood,
+      },
+      sleep: {
+        eyebrow: 'THE TRAILHEAD · ASLEEP',
+        title: 'You fell asleep standing up',
+        blurb: 'The lantern went dark. Half the satchel is gone when you wake.',
+        color: C.blood,
+      },
+    }[this.cause];
 
     this.add
       .rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, C.ink, 0.78)
@@ -1081,73 +894,49 @@ export class WoodsScene extends Phaser.Scene {
 
     const panel = this.add.graphics();
     inkPanel(panel, w, h, { fill: C.inkSoft, stroke: C.line, radius: 8 });
-
-    // Everything in the summary lives in one screen-space container, so all
-    // child positions are panel-local and travel with the panel's entrance.
     const box = this.add.container(x, y, [panel]).setScrollFactor(0).setDepth(1101);
     const into = <T extends Phaser.GameObjects.GameObject>(obj: T): T => {
       box.add(obj);
       return obj;
     };
 
+    into(this.add.text(44, 34, copy.eyebrow, mono(10, copy.color)));
+    into(this.add.text(42, 54, copy.title, display(42, C.crema, { fontStyle: '600' })));
     into(
-      this.add.text(
-        44,
-        34,
-        died ? 'THE TRAILHEAD · DAWN' : 'THE TRAILHEAD · SAFE',
-        mono(10, died ? C.blood : C.mossLight),
-      ),
-    );
-    into(
-      this.add.text(
-        42,
-        54,
-        died ? 'You wake on the path' : 'Home with the haul',
-        display(46, C.crema, { fontStyle: '600' }),
-      ),
-    );
-    into(
-      this.add.text(
-        44,
-        118,
-        died
-          ? 'Something carried you back. The satchel is lighter than it was.'
-          : 'The lantern found you first. The satchel comes home full.',
-        { ...display(17, C.cremaDim, { fontStyle: 'italic' }), wordWrap: { width: w - 88 } },
-      ),
+      this.add.text(44, 116, copy.blurb, {
+        ...display(17, C.cremaDim, { fontStyle: 'italic' }),
+        wordWrap: { width: w - 88 },
+      }),
     );
 
     const rule = this.add.graphics();
-    divider(rule, 44, 184, w - 44, C.line, 0.9);
-    rule.fillStyle(died ? C.blood : C.mossLight, 1);
-    rule.fillRect(44, 182, 40, 3);
+    divider(rule, 44, 180, w - 44, C.line, 0.9);
+    rule.fillStyle(copy.color, 1);
+    rule.fillRect(44, 178, 40, 3);
     into(rule);
 
-    const elapsed = Math.max(0, (this.time.now - this.startedAt) / 1000);
-    const mm = Math.floor(elapsed / 60);
-    const ss = Math.floor(elapsed % 60);
     const col = (label: string, value: string, cx: number): void => {
-      into(this.add.text(cx, 204, label, mono(9.5, C.cremaFaint)));
-      into(this.add.text(cx, 220, value, display(26, C.crema, { fontStyle: '600' })));
+      into(this.add.text(cx, 202, label, mono(9, C.cremaFaint)));
+      into(this.add.text(cx, 218, value, display(24, C.crema, { fontStyle: '600' })));
     };
-    col('TIME IN THE WOODS', `${mm}:${String(ss).padStart(2, '0')}`, 44);
-    col('FELLED', String(this.stats.kills), 214);
-    col('COINS FOUND', String(this.stats.coins), 350);
+    col('TIME LEFT', clock(this.timeLeft), 44);
+    col('TRAIL REACHED', `${Math.round(this.progressValue() * 100)}%`, 178);
+    col('FELLED', String(this.stats.kills), 312);
+    col('COINS', String(this.stats.coins), 420);
 
     const split = this.add.graphics();
     split.lineStyle(1, C.line, 0.55);
-    split.lineBetween(476, 196, 476, 366);
+    split.lineBetween(510, 194, 510, 362);
     into(split);
 
-    // Satchel, right column.
-    into(this.add.text(w - 44, 198, 'SATCHEL', mono(9.5, C.cremaFaint)).setOrigin(1, 0));
+    into(this.add.text(w - 44, 196, 'SATCHEL', mono(9.5, C.cremaFaint)).setOrigin(1, 0));
     let rowY = 216;
     let rows = 0;
     INGREDIENT_ORDER.forEach((id) => {
       const n = kept[id] ?? 0;
       if (n === 0 && (lost[id] ?? 0) === 0) return;
-      into(this.add.image(w - 232, rowY + 8, `ico-${id}`).setScale(0.7));
-      into(this.add.text(w - 210, rowY, INGREDIENTS[id].name, mono(11.5, C.cremaDim)));
+      into(this.add.rectangle(w - 232, rowY + 8, 16, 16, INGREDIENTS[id].color).setStrokeStyle(1, C.ink));
+      into(this.add.text(w - 214, rowY, INGREDIENTS[id].name, mono(11, C.cremaDim)));
       into(
         this.add
           .text(w - 44, rowY - 2, `×${n}`, display(18, C.crema, { fontStyle: '600' }))
@@ -1160,27 +949,24 @@ export class WoodsScene extends Phaser.Scene {
       into(this.add.text(w - 44, 224, 'nothing but leaves', mono(11, C.cremaFaint)).setOrigin(1, 0));
     }
 
-    if (died) {
+    if (!safe) {
       const lostBits = INGREDIENT_ORDER.filter((id) => (lost[id] ?? 0) > 0)
         .map((id) => `${lost[id]}× ${INGREDIENTS[id].name}`)
         .join(' · ');
       if (lostBits) {
-        into(this.add.text(44, 270, 'LOST ON THE PATH', mono(9.5, C.blood)));
-        into(this.add.text(44, 288, lostBits, { ...mono(10.5, C.cremaDim), wordWrap: { width: 400 } }));
+        into(this.add.text(44, 264, 'LOST ON THE PATH', mono(9.5, C.blood)));
+        into(this.add.text(44, 282, lostBits, { ...mono(10.5, C.cremaDim), wordWrap: { width: 440 } }));
       }
     }
 
     into(
-      this.add.text(
-        44,
-        344,
-        'The pantry keeps what came back. The shop is still being built.',
-        { ...mono(10.5, C.cremaFaint), wordWrap: { width: 400 } },
-      ),
+      this.add.text(44, 344, 'The pantry keeps what came back. The shop is still being built.', {
+        ...mono(10.5, C.cremaFaint),
+        wordWrap: { width: 440 },
+      }),
     );
 
-    // Buttons stay at scene level: interactive objects nested in a container
-    // do not receive pointer events in Phaser 4.
+    // Interactive buttons must stay at scene level in Phaser 4.
     const again = new Button(this, {
       x: x + 44,
       y: y + h - 62,
@@ -1217,7 +1003,7 @@ export class WoodsScene extends Phaser.Scene {
   }
 
   /* ------------------------------------------------------------------ */
-  /* Pause                                                               */
+  /* Pause                                                                */
   /* ------------------------------------------------------------------ */
 
   private togglePause(): void {
@@ -1228,7 +1014,7 @@ export class WoodsScene extends Phaser.Scene {
     }
     this.paused = true;
     this.physics.pause();
-    this.player.setVelocity(0, 0);
+    this.player.box.body.setVelocity(0, 0);
 
     const dim = this.add
       .rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, C.ink, 0.72)
@@ -1239,13 +1025,12 @@ export class WoodsScene extends Phaser.Scene {
     inkPanel(panel, 420, 250, { fill: C.inkSoft, stroke: C.line, radius: 8 });
     const eyebrow = this.add.text(32, 32, 'THE WOODS WAIT', mono(10, C.cremaFaint));
     const title = this.add.text(30, 50, 'Paused', display(40, C.crema, { fontStyle: '600' }));
-    const note = this.add.text(32, 108, 'The satchel stays with you.', mono(11, C.cremaDim));
+    const note = this.add.text(32, 108, `The clock stops too. ${clock(this.timeLeft)} left.`, mono(11, C.cremaDim));
     const box = this.add
       .container(GAME_WIDTH / 2 - 210, GAME_HEIGHT / 2 - 125, [panel, eyebrow, title, note])
       .setScrollFactor(0)
       .setDepth(1201);
 
-    // As in the summary, buttons must not be nested in the overlay container.
     const resume = new Button(this, {
       x: GAME_WIDTH / 2 - 210 + 32,
       y: GAME_HEIGHT / 2 - 125 + 148,

@@ -33,9 +33,10 @@ bundled via `@fontsource`.
 | | |
 |---|---|
 | **WASD** or **arrow keys** | move through the woods |
-| **Space** or **click** | swing the steam wand |
+| **mouse** | aim; the reticle shows where the swing will land |
+| **Space** or **click** | swing the steam wand toward the mouse, not toward your movement |
 | **E** | head home, when standing by the trailhead lantern |
-| **Esc** | pause in the woods / back to title on stub screens |
+| **Esc** | pause (the sleep clock pauses too) / back to title on stub screens |
 | **M** | mute |
 
 ## What is playable now
@@ -46,14 +47,24 @@ for dusk → Take the lantern**.
 
 In the woods:
 
-- Wander a procedurally laid out forest of clearings and winding trails.
-- Forage Wild beans, Moonmilk, Glowcaps, Emberberries and the rare Void bean.
-  The satchel in the HUD counts what is currently on you.
+- Follow one long, linear trail from the trailhead to the Deep Grove. The HUD
+  shows a progress bar, distance remaining and `>> DEEPER` markers in the world;
+  there is no ambiguity about which way to go.
+- A **2:30 clock** ticks down the whole time. If it reaches zero the knight falls
+  asleep on the path, the run ends, and half the satchel is lost. Dying costs the
+  same half. The clock stops while paused.
+- Forage Wild beans, Moonmilk, Glowcaps, Emberberries and the rare Void bean in
+  bands along the trail. The satchel in the HUD counts what is currently on you.
 - Fight slimes, moths and a moss-backed elder slime. Slimes hop toward you when
-  they notice you; moths veer in erratically. Space swings in the direction you
-  last moved.
-- Return to the trailhead lantern and press **E** to bank the haul. Death costs
-  half the satchel, but you always wake back at the shop.
+  they notice you; moths veer in erratically. Attacks fire in the direction of
+  the mouse click.
+- Three **thermos slots** sit in the HUD. They are visible empty stubs for now;
+  the day/dusk shift will fill them with drinks made and equipped before the run.
+- Return to the trailhead lantern and press **E** to bank the full haul.
+
+Actors are deliberately plain coloured hitboxes with text labels while the art
+direction for this phase is being settled. The world, HUD and summary screens
+keep the game's established look.
 
 The haul and coins are written to the save file, so the eventual day shift will
 be able to spend them. Right now the shop stub cannot spend anything yet.
@@ -65,8 +76,9 @@ be able to spend them. Right now the shop stub cannot spend anything yet.
    before patience runs out. *(stub)*
 2. **Dusk — the ledger.** Takings become upgrades that widen the pour window, slow
    the needle, add a heart, light the lantern, or extend patience. *(stub)*
-3. **Night — the woods.** Fight, forage, and carry ingredients back to the
-   trailhead. The deeper you go, the stranger the beans. *(playable)*
+3. **Night — the woods.** Walk the trail, fight, forage, and get back to the
+   trailhead before the knight falls asleep. The deeper you go, the stranger the
+   beans. *(playable)*
 4. **Dawn — the ledger again.** The haul restocks the pantry; the next day's menu
    gets richer. Then the shop opens. *(stub)*
 
@@ -93,7 +105,7 @@ src/
       PhaseStub.ts         shared shell for the unbuilt phase screens
       ShopScene.ts         DAY   — stub
       DuskScene.ts         DUSK  — stub
-      WoodsScene.ts        NIGHT — playable forage + combat
+      WoodsScene.ts        NIGHT — linear trail, timer, forage + combat
       LedgerScene.ts       DAWN  — stub
 ```
 

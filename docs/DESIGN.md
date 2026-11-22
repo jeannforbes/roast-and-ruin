@@ -103,36 +103,52 @@ upgrade; the woods are what makes the second upgrade possible.
 
 ## Night shift — playable now
 
-The woods are one continuous screen-sized slice of a larger world, not a set of
-floors. The map is laid out fresh each run.
+One long, **linear** trail, laid out fresh each run. The knight starts at the
+trailhead on the west end and the Deep Grove sits at the east end; there are no
+branches, so the only decision is how far to push before turning back.
 
-- **World**: 48×36 tiles of 40px (1920×1440). Five or six circular clearings are
-  joined by wandering, two-tile-wide trails. Tree stands block movement; ferns,
-  bushes and stumps decorate the walkable ground. The camera follows the player.
-- **Pathing**: a flood fill from the start checks that the clearings are reachable;
-  the layout is regenerated if it is too small.
-- **Player**: 3 hearts (+1 per iron charm), speed 238px/s, knockback and 1.2s of
-  invulnerability when hit. Space/click swings a 96px cone on a 360ms cooldown.
-- **Forage**: 13 nodes — 4 Wild bean, 3 Moonmilk, 3 Glowcap, 2 Emberberry, 1 Void
-  bean — spread across the clearings. Touching one adds it to the satchel and
-  saves it only when you get home.
-- **Enemies**: 13 total — forest slimes (2hp, hop toward you), moths (1hp, erratic
-  flight) and one elder slime (8hp) in the farthest clearing. Creatures only
-  notice the lantern within 270px (340px for the elder); beyond that they wander.
-  Contact costs one heart.
+- **World**: 120×20 tiles of 40px (4800×800). A snaking corridor three tiles wide
+  wanders between `trailY(x) = 10 + sin(x/13)*3 + sin(x/5.3)*1.1`, widening into
+  six clearings. Everything off the corridor is a static blocker. The camera
+  follows the knight horizontally; the vertical span is a little taller than the
+  viewport.
+- **Direction**: a progress bar, a distance-to-Deep-Grove readout and in-world
+  `>> DEEPER` signs at x = 20/44/68/92. The end marker is a labelled rectangle.
+- **Clock**: 150 seconds, decreasing every frame, shown as `m:ss` at the top
+  centre. It turns red in the last 30 seconds and pauses with the game. At zero
+  the knight falls asleep on the path: the run ends with half the satchel lost,
+  exactly like being injured.
+- **Thermos**: three visible HUD slots labelled `THERMOS 1..3`, each reading
+  `empty — dusk`. They are a deliberate stub for drinks made and equipped during
+  the (unbuilt) day/dusk shift.
+- **Player**: 3 health (+1 per iron charm), speed 250px/s, knockback and 1.2s of
+  invulnerability when hit. **Attacks are aimed with the mouse**: a reticle marks
+  the cursor's world position and the 110px swing cone is centred on
+  `atan2(cursor - knight)`. Movement direction is irrelevant; Space and click
+  both fire the same aimed swing on a 340ms cooldown.
+- **Forage**: 15 nodes in bands along the trail — 4 Wild bean (x 9–32), 3 Moonmilk
+  (30–54), 3 Glowcap (52–76), 3 Emberberry (74–98), 2 Void bean (96–116).
+  Touching one adds it to the satchel; it is banked only on a successful return.
+- **Enemies**: 10 total — slimes every 16 tiles (2hp, hop toward you), moths every
+  26 tiles (1hp, erratic flight) and one elder slime (8hp) near the far end.
+  Creatures only notice the lantern within 260px (330px for the elder); beyond
+  that they wander. Contact costs one health.
 - **Loot**: 22% of slimes drop an extra ingredient, elders drop three; kills have
   a 34% coin chance (12 coins for an elder).
-- **Exit**: the trailhead lantern at the start. Stand near it and press E to end
-  the run. The summary banks the satchel and coins into the save, adds lifetime
-  kills, and offers *Forage again* or *Back to title*.
-- **Death**: you wake on the path with half the satchel rounded down; the other
-  half is listed as lost on the summary screen. Progress never resets.
+- **Presentation**: actors are plain coloured rectangles with text labels
+  (`KNIGHT`, `SLIME 2`, `MOONMILK`, …) so combat reads clearly while sprite art is
+  undecided. The ground, HUD, vignette and panels keep the established look.
+- **Exit**: the trailhead marker at the start. Stand near it and press E to bank
+  the full haul. The summary banks satchel and coins into the save, adds lifetime
+  kills, reports time left / trail reached / felled / coins, and offers
+  *Forage again* or *Back to title*.
+- **Failure**: death or sleep wakes you with half the satchel rounded down; the
+  other half is listed as lost on the summary. Progress never resets.
 
 ### Ideas not built yet
 
 - Depth tiers — Bean Groves, Glowcap Rings, Deep Grove — with richer loot tables.
-- A candle/lantern timer as a pacing device: when it gutters, damage and loot loss
-  start ticking.
+- Filling the thermos slots with actual drinks from the day shift.
 - A splits-at-half-health guardian for the deepest trail.
 - Route choices at dusk, and reputation penalties for dying.
 
@@ -158,7 +174,11 @@ woods summary already performs the pantry/coins part.
 - Title screen with the shop/dark double-exposure, save-aware menu and a direct
   woods shortcut
 - Scene graph and transitions: title → shop (stub) → dusk (stub) → woods → title
-- Playable woods: generation, movement, combat, foraging, pause, summary, save
+- Playable woods: linear trail with direction cues, mouse-aimed combat, foraging,
+  movement, pause, summary and save
+- 150-second sleep clock with death/sleep haul loss and a paused clock
+- Three visible thermos slots stubbed for day-shift drinks
+- Actors drawn as labelled hitboxes until sprite art is chosen
 - Meta save/load with pantry, upgrades, lifetime stats
 - Economy tables, drink/upgrade effects, loot tables, day pacing
 - Build, typecheck, Pages workflow
