@@ -969,6 +969,7 @@ export class WoodsScene extends Phaser.Scene {
     if (this.dying) return;
     this.dying = true;
     this.cause = 'death';
+    this.closeMap();
     this.clearSwing();
     this.player.box.body.setVelocity(0, 0);
     this.player.box.body.enable = false;
