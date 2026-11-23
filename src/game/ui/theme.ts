@@ -98,8 +98,13 @@ export class Button extends Phaser.GameObjects.Container {
     }
 
     this.setSize(opts.w, opts.h);
+    // Phaser adds a Container's half-size display origin to local pointer
+    // coordinates before testing the hit area, while the drawn background uses
+    // the container position as its top-left. Starting the hit area at that
+    // half-size maps it back onto the visible button instead of centring it on
+    // the container position (which left the right/bottom edges dead).
     this.setInteractive(
-      new Phaser.Geom.Rectangle(0, 0, opts.w, opts.h),
+      new Phaser.Geom.Rectangle(opts.w / 2, opts.h / 2, opts.w, opts.h),
       Phaser.Geom.Rectangle.Contains,
     );
     this.input!.cursor = 'pointer';
