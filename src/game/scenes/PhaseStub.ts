@@ -55,7 +55,7 @@ export class PhaseStub extends Phaser.Scene {
       .setBlendMode(Phaser.BlendModes.ADD);
 
     const cardW = 760;
-    const cardH = 408;
+    const cardH = 452;
     const cx = GAME_WIDTH / 2 - cardW / 2;
     const cy = GAME_HEIGHT / 2 - cardH / 2 + 8;
 
@@ -75,13 +75,13 @@ export class PhaseStub extends Phaser.Scene {
     });
 
     const rule = this.add.graphics();
-    divider(rule, pad, 206, cardW - pad, C.line, 0.9);
+    divider(rule, pad, 236, cardW - pad, C.line, 0.9);
     rule.fillStyle(C.roast, 1);
-    rule.fillRect(pad, 204, 40, 3);
+    rule.fillRect(pad, 234, 40, 3);
 
-    const statusLabel = this.add.text(pad, 228, 'TO BUILD', mono(10, C.ember));
+    const statusLabel = this.add.text(pad, 258, 'TO BUILD', mono(10, C.ember));
     const rows = this.spec.build.map((line, i) => {
-      const y = 254 + i * 26;
+      const y = 284 + i * 26;
       const dot = this.add.graphics();
       dot.lineStyle(1, C.cremaFaint, 0.8);
       dot.strokeCircle(pad + 5, y + 7, 3.5);
@@ -89,12 +89,10 @@ export class PhaseStub extends Phaser.Scene {
       return [dot, t];
     });
 
-    const foot = this.add.text(
-      pad,
-      cardH - 46,
-      this.spec.status,
-      mono(10.5, C.cremaFaint),
-    );
+    const foot = this.add.text(pad, cardH - 82, this.spec.status, {
+      ...mono(10.5, C.cremaFaint),
+      wordWrap: { width: cardW - pad * 2 },
+    });
 
     content.add([eyebrow, title, blurb, rule, statusLabel, ...rows.flat(), foot]);
 
