@@ -157,6 +157,35 @@ class Sfx {
     this.noise(0.16, 0.1, 0, 800);
   }
 
+  dash(): void {
+    this.noise(0.18, 0.07, 0, 3200);
+    this.tone({ freq: 300, to: 720, dur: 0.16, type: 'triangle', gain: 0.05 });
+  }
+
+  heavyHit(): void {
+    this.noise(0.14, 0.16, 0, 320);
+    this.tone({ freq: 90, to: 42, dur: 0.18, type: 'square', gain: 0.1 });
+  }
+
+  enemyDeath(): void {
+    this.noise(0.22, 0.09, 0, 900);
+    this.tone({ freq: 320, to: 110, dur: 0.22, type: 'triangle', gain: 0.07 });
+  }
+
+  telegraph(): void {
+    this.tone({ freq: 880, to: 1180, dur: 0.1, type: 'square', gain: 0.035 });
+  }
+
+  shoot(): void {
+    this.tone({ freq: 720, to: 420, dur: 0.13, type: 'sawtooth', gain: 0.045 });
+  }
+
+  waveClear(): void {
+    [523, 659, 880].forEach((f, i) =>
+      this.tone({ freq: f, dur: 0.18, type: 'triangle', gain: 0.06, delay: i * 0.07 }),
+    );
+  }
+
   pickup(): void {
     this.tone({ freq: 880, to: 1320, dur: 0.09, type: 'sine', gain: 0.06 });
   }

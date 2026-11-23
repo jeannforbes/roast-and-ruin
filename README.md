@@ -36,6 +36,7 @@ bundled via `@fontsource`.
 | **WASD** or **arrow keys** | move through the woods |
 | **mouse** | aim; the reticle shows where the middle of the sweep will point |
 | **Space** or **click** | sweep a straight blade line across the mouse direction, not toward your movement |
+| **Shift** or **right-click** | dash in your movement direction (or toward the mouse if still), with brief invulnerability |
 | **E** | head home, when standing by the trailhead lantern |
 | **click the map** | at the far end of a trail, pick the next area (or head home) |
 | **Esc** | pause (the sleep clock pauses too) / back to title on stub screens |
@@ -58,10 +59,18 @@ In the woods:
 - Forage the current area's ingredients in bands along its trail — Wild beans,
   Moonmilk, Glowcaps, Emberberries and Void beans are spread across the nine
   areas. The satchel in the HUD counts what is currently on you.
+- The trail is split into **four chambers**. Crossing into one drops gates at
+  both ends and spawns a wave; the gates open only when everything in the wave is
+  dead. The far marker releases the map once the last chamber is clear. Boss
+  areas put their boss in that final chamber.
 - Fight slimes, moths and a moss-backed elder slime; boss areas add a Warden or
-  the Lantern Moth at the far end. Slimes hop toward you, moths veer erratically.
-  The sword is a straight line that sweeps from one side to the other over 240ms,
+  the Lantern Moth at the far end. Creatures **telegraph** before they lunge — a
+  red ring and flashing outline give you time to dash through. A hit staggers
+  them, and an enraged boss (below half health) fires a spread of bolts.
+- The sword is a straight line that sweeps from one side to the other over 240ms,
   with the middle of the sweep aimed exactly where the mouse was when you clicked.
+  Landed hits add hit-stop, particles, damage numbers, a camera punch and layered
+  audio, so swings and kills have weight.
 - Three **thermos slots** sit in the HUD. They are visible empty stubs for now;
   the day/dusk shift will fill them with drinks made and equipped before the run.
 - **Travel deeper:** walking to the far marker opens a map of the woods. Unvisited
@@ -136,6 +145,8 @@ the counter and a cup in the foreground.
 
 - [x] Scaffold: run/build, palette, type, procedural art, audio, save state
 - [x] Woods prototype: movement, foraging, combat, exit, summary
+- [x] Combat feel: dash i-frames, telegraphed attacks, hit-stop and impact FX
+- [x] Chambers: four sealed waves per trail with gates and a final boss wave
 - [x] Woods map: nine-area graph, fog, resource summaries, boss gates, travel
 - [ ] Day shift: customers, orders, pour gauge, patience, takings
 - [ ] Dusk ledger: upgrades and trail selection

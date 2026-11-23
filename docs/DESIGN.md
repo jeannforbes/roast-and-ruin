@@ -105,9 +105,11 @@ upgrade; the woods are what makes the second upgrade possible.
 
 Each area is one long, **linear** trail, laid out fresh each run. The knight
 starts at the trailhead on the west end and the area's far marker sits at the east
-end. Branches live on the map between areas, not inside a trail: reaching the far
-marker opens the map, and the only decision on the ground is how far to push
-before turning back.
+end. Branches live on the map between areas, not inside a trail. On the ground the
+trail is divided into four **chambers**: entering one seals both ends and spawns a
+wave, and the gates only open once the wave is dead. Reaching the far marker opens
+the map after the last chamber is clear, so the decision on the ground is when to
+fight and when to turn back.
 
 - **World**: 120×20 tiles of 40px (4800×800). A snaking corridor three tiles wide
   wanders between `trailY(x) = 10 + sin(x/13)*3 + sin(x/5.3)*1.1`, widening into
@@ -125,22 +127,38 @@ before turning back.
 - **Thermos**: three visible HUD slots labelled `THERMOS 1..3`, each reading
   `empty — dusk`. They are a deliberate stub for drinks made and equipped during
   the (unbuilt) day/dusk shift.
-- **Player**: 3 health (+1 per iron charm), speed 250px/s, knockback and 1.2s of
-  invulnerability when hit. **Attacks are aimed with the mouse**: a reticle marks
-  the cursor's world position. The sword is a straight 110px line that sweeps
-  from `aim - 1.0rad` to `aim + 1.0rad` over 240ms, so the midpoint of the sweep
-  points exactly at `atan2(cursor - knight)` captured at the moment of attack.
-  Movement direction is irrelevant; Space and click both fire the same sweep on
-  a 340ms cooldown. Enemies are hit when the rotating line crosses their box.
+- **Player**: 3 health (+1 per iron charm), speed 310px/s, knockback and 0.8s of
+  invulnerability when hit. **Dash** (Shift / right-click) covers 130ms at
+  1250px/s on an 850ms cooldown, grants i-frames through the burst and beyond, and
+  cancels attack recovery — it is the core evasion and repositioning tool.
+  **Attacks are aimed with the mouse**: a reticle marks the cursor's world
+  position. The sword is a straight 110px line that sweeps from `aim - 1.0rad` to
+  `aim + 1.0rad` over 240ms, so the midpoint of the sweep points exactly at
+  `atan2(cursor - knight)` captured at the moment of attack. Movement direction is
+  irrelevant; Space and click both fire the same sweep on a 300ms cooldown.
+  Enemies are hit when the rotating line crosses their box.
+- **Impact**: a confirmed hit pauses physics for 45ms (85ms on a boss), flashes a
+  damage number, throws coloured shards, and punches the camera; kills add a ring
+  and a longer shake. The audio layers swing, impact, death, dash, telegraph and
+  wave-clear cues instead of sharing one blip.
 - **Forage**: the current area's resource table decides both which ingredients
   appear and how many — `few` = 2 nodes, `some` = 3, `lots` = 5 — spread evenly in
   bands along the trail. Touching one adds it to the satchel and marks it as
   *known* in that area for the map; it is banked only on a successful return.
+- **Chambers**: four ranges (`7–33`, `37–63`, `67–91`, `95–116`), each sealed by
+  two static gates while its wave lives. Area enemy counts are divided between
+  them; the final chamber also carries the elder and the area boss when present.
+  Passing the far marker before that wave is dead cannot open the map.
 - **Enemies**: each area defines its own counts of slimes (2hp, hop toward you),
   moths (1hp, erratic flight) and the elder slime (8hp). Boss areas add a Warden
-  or Lantern Moth (14–24hp, 110×64 hitbox) at the far end that physically blocks
-  the map until it dies. Creatures only notice the lantern within 260px (330px for
-  the elder); beyond that they wander. Contact costs one health.
+  or Lantern Moth (14–24hp, 110×64 hitbox) to the final chamber. Creatures notice
+  the lantern within 280px (330px for the elder); beyond that they wander. Instead
+  of contact damage they cycle **idle → windup → strike → recover**: a 380ms red
+  ring and flashing outline telegraphs the lunge, the strike lasts 180ms (220ms
+  for a boss), then 420ms of recovery. A landed hit interrupts the windup and
+  staggers the creature for 230ms (110ms for a boss). At half health a boss fires
+  a three-shot spread with its strike; bolts expire after 2.2s and are destroyed
+  by walls or the knight.
 - **Loot**: 22% of slimes drop an extra ingredient, elders drop three; kills have
   a 34% coin chance (12 coins for an elder).
 - **Presentation**: actors are plain coloured rectangles with text labels
@@ -155,8 +173,8 @@ before turning back.
 
 ### Map of the woods
 
-Walking to the far marker (or killing the area boss) opens a graph overlay. It is
-a deliberate night-scoped abstraction: **map knowledge resets every run**
+Clearing the final chamber and walking to the far marker opens a graph overlay. It
+is a deliberate night-scoped abstraction: **map knowledge resets every run**
 (`freshMap()`), so the player re-learns the wood each night, but the satchel,
 health and clock carry into the chosen area via `scene.restart({ area, run, map })`.
 
@@ -173,8 +191,9 @@ health and clock carry into the chosen area via `scene.restart({ area, run, map 
   splits into Cinder Court and Root Vault, which both feed Void Gate. Edges light
   up gold between explored nodes and ember toward an available next area.
 - **Boss gates**: walking to the end of a boss area does *not* complete it — the
-  Warden/Moth must die. The kill marks the area explored, reveals its unlocks and
-  opens the map after a short beat. Old Bridge opens Ember Fork, Cinder Court and
+  Warden/Moth must die. The kill marks the area explored and reveals its unlocks;
+  the map opens once the whole final wave is down (or the knight walks to the far
+  marker). Old Bridge opens Ember Fork, Cinder Court and
   Root Vault open Void Gate (each still requires both branches explored), and Void
   Gate opens Dawn Below.
 - **Home**: a *Home with the haul* button on the map ends the run safely without
@@ -211,6 +230,9 @@ woods summary already performs the pantry/coins part.
 - Scene graph and transitions: title → shop (stub) → dusk (stub) → woods → title
 - Playable woods: per-area linear trail with direction cues, mouse-aimed sword
   sweep, area-specific foraging, movement, pause, summary and save
+- Combat feel: i-frame dash, stagger, telegraphed windups, hit-stop, damage
+  numbers, particles, camera punch and layered audio
+- Four sealed chambers per trail with wave spawns, gates and a final boss wave
 - Nine-area graph map with fog, highlighted next areas, resource frequency
   summaries, boss gates and mid-run travel that carries the satchel and clock
 - 150-second sleep clock with death/sleep haul loss and a paused clock (the clock
