@@ -6,6 +6,7 @@ import { reducedMotion } from '../art/draw';
 import { sfx } from '../systems/audio';
 import { meta, saveMeta } from '../state';
 import { INGREDIENTS, IngredientId, INGREDIENT_ORDER, rollIngredient } from '../data/economy';
+import { AREAS, AREA_ORDER, AreaId, FREQUENCY_TEXT, ResourceFrequency } from '../data/areas';
 
 const TILE = 40;
 const MAP_W = 120;
@@ -24,9 +25,12 @@ const ATTACK_RANGE = 110;
 const SWEEP_ARC = 2.0;
 const SWING_MS = 240;
 const INVULN_MS = 1200;
+const RESOURCE_COUNT: Record<ResourceFrequency, number> = { few: 2, some: 3, lots: 5 };
+const MAP_PANEL = { x: 40, y: 60, w: 1200, h: 600 };
+const MAP_NODE = { w: 176, h: 50 };
 
 type Box = Phaser.GameObjects.Rectangle & { body: Phaser.Physics.Arcade.Body };
-type EnemyKind = 'slime' | 'moth' | 'elder';
+type EnemyKind = 'slime' | 'moth' | 'elder' | 'boss';
 type EndCause = 'home' | 'death' | 'sleep';
 
 interface Actor {
@@ -36,6 +40,7 @@ interface Actor {
 
 interface Enemy extends Actor {
   kind: EnemyKind;
+  name: string;
   hp: number;
   speed: number;
   radius: number;
@@ -57,6 +62,27 @@ interface RunStats {
   haul: Record<IngredientId, number>;
 }
 
+interface MapProgress {
+  current: AreaId;
+  explored: Set<AreaId>;
+  unlocked: Set<AreaId>;
+  bossCleared: Set<AreaId>;
+  known: Partial<Record<AreaId, Set<IngredientId>>>;
+}
+
+interface RunCarry {
+  stats: RunStats;
+  timeLeft: number;
+  hp: number;
+  maxHp: number;
+}
+
+interface WoodsInitData {
+  area?: AreaId;
+  run?: RunCarry;
+  map?: MapProgress;
+}
+
 /** A blade sweep: a straight line rotating from one arc edge to the other. */
 interface Swing {
   graphics: Phaser.GameObjects.Graphics;
@@ -71,6 +97,18 @@ const clock = (seconds: number): string => {
   const s = Math.max(0, Math.ceil(seconds));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 };
+
+/** Map knowledge is deliberately night-scoped: every fresh run starts fogged. */
+const freshMap = (area: AreaId = 'deep_grove'): MapProgress => ({
+  current: area,
+  explored: new Set<AreaId>(),
+  unlocked: new Set<AreaId>([area]),
+  bossCleared: new Set<AreaId>(),
+  known: {},
+});
+
+const enemyColor = (kind: EnemyKind): number =>
+  kind === 'boss' ? C.plum : kind === 'elder' ? C.mossDark : kind === 'moth' ? C.moon : C.mossMid;
 
 /**
  * The night slice: one long, linear trail with a lantern behind you and a
@@ -101,6 +139,12 @@ export class WoodsScene extends Phaser.Scene {
   private progress!: ReturnType<typeof progressBar>;
   private reticle!: Phaser.GameObjects.Graphics;
   private swing?: Swing;
+  private areaId: AreaId = 'deep_grove';
+  private map!: MapProgress;
+  private pending?: WoodsInitData;
+  private mapOpen = false;
+  private mapOverlay?: Phaser.GameObjects.Container;
+  private mapButtons: Button[] = [];
   private lastHint = '';
   private overlay?: Phaser.GameObjects.Container;
   private overlayButtons: Button[] = [];
@@ -124,13 +168,23 @@ export class WoodsScene extends Phaser.Scene {
     super('Woods');
   }
 
+  init(data: WoodsInitData = {}): void {
+    this.pending = data;
+  }
+
   private emptyHaul(): Record<IngredientId, number> {
     return { bean: 0, milk: 0, mushroom: 0, ember: 0, void: 0 };
   }
 
   create(): void {
     this.physics.resume();
-    this.stats = { kills: 0, coins: 0, haul: this.emptyHaul() };
+    const carry = this.pending?.run;
+    this.areaId = this.pending?.area ?? 'deep_grove';
+    this.map = this.pending?.map ?? freshMap(this.areaId);
+    this.map.current = this.areaId;
+    this.stats = carry
+      ? { ...carry.stats, haul: { ...carry.stats.haul } }
+      : { kills: 0, coins: 0, haul: this.emptyHaul() };
     this.enemies = [];
     this.forage = [];
     this.occupied = new Set();
@@ -140,14 +194,18 @@ export class WoodsScene extends Phaser.Scene {
     this.cause = 'home';
     this.overlay = undefined;
     this.overlayButtons = [];
+    this.mapOpen = false;
+    this.mapOverlay = undefined;
+    this.mapButtons = [];
     this.lastHint = '';
-    this.timeLeft = RUN_SECONDS;
+    this.timeLeft = carry?.timeLeft ?? RUN_SECONDS;
     this.attackReadyAt = 0;
     this.swing = undefined;
     this.invulnUntil = 0;
     this.knockbackUntil = 0;
-    this.maxHp = 3 + meta.upgrades.charm;
-    this.hp = this.maxHp;
+    this.maxHp = carry?.maxHp ?? 3 + meta.upgrades.charm;
+    this.hp = carry?.hp ?? this.maxHp;
+    this.pending = undefined;
 
     this.cameras.main.setBackgroundColor(css(C.forestDeep));
     this.input.keyboard?.once('keydown', () => sfx.unlock());
@@ -334,71 +392,92 @@ export class WoodsScene extends Phaser.Scene {
     }
 
     const e = this.tileCenter(this.end.x, this.end.y);
+    const area = AREAS[this.areaId];
     this.add
-      .rectangle(e.x, e.y, 150, 84, C.plum, 0.4)
-      .setStrokeStyle(2, C.plum)
+      .rectangle(e.x, e.y, 150, 84, area.boss ? C.blood : C.plum, 0.4)
+      .setStrokeStyle(2, area.boss ? C.blood : C.plum)
       .setDepth(e.y);
     this.add
-      .text(e.x, e.y - 8, 'DEEP GROVE', display(18, C.crema))
+      .text(e.x, e.y - 8, area.name.toUpperCase(), display(18, C.crema))
       .setOrigin(0.5)
       .setDepth(e.y + 1);
     this.add
-      .text(e.x, e.y + 16, 'END OF TRAIL', mono(9, C.cremaDim))
+      .text(e.x, e.y + 16, area.boss ? 'BOSS AHEAD' : 'MAP AHEAD', mono(9, area.boss ? C.blood : C.cremaDim))
       .setOrigin(0.5)
       .setDepth(e.y + 1);
   }
 
   private placeForage(): void {
-    const bands: { id: IngredientId; min: number; max: number; n: number }[] = [
-      { id: 'bean', min: 9, max: 32, n: 4 },
-      { id: 'milk', min: 30, max: 54, n: 3 },
-      { id: 'mushroom', min: 52, max: 76, n: 3 },
-      { id: 'ember', min: 74, max: 98, n: 3 },
-      { id: 'void', min: 96, max: MAP_W - 5, n: 2 },
-    ];
+    const resources = AREAS[this.areaId].resources;
+    const ids = INGREDIENT_ORDER.filter((id) => resources[id]);
+    const firstX = 9;
+    const lastX = MAP_W - 5;
+    const width = (lastX - firstX) / Math.max(1, ids.length);
 
-    bands.forEach((band) => {
-      for (let i = 0; i < band.n; i++) {
-        const tile = this.randomTile(band.min, band.max);
+    ids.forEach((id, band) => {
+      const min = Math.floor(firstX + band * width);
+      const max = Math.floor(firstX + (band + 1) * width);
+      const n = RESOURCE_COUNT[resources[id]!];
+      for (let i = 0; i < n; i++) {
+        const tile = this.randomTile(min, max);
         if (!tile) continue;
         const c = this.tileCenter(tile.x, tile.y);
         const box = this.add
-          .rectangle(c.x, c.y, 36, 30, INGREDIENTS[band.id].color, 0.85)
+          .rectangle(c.x, c.y, 36, 30, INGREDIENTS[id].color, 0.85)
           .setStrokeStyle(2, C.ink)
           .setDepth(c.y + 1);
         const label = this.add
-          .text(c.x, c.y - 30, INGREDIENTS[band.id].name.toUpperCase(), mono(9, C.crema))
+          .text(c.x, c.y - 30, INGREDIENTS[id].name.toUpperCase(), mono(9, C.crema))
           .setOrigin(0.5)
           .setDepth(c.y + 2);
-        this.forage.push({ box, label, id: band.id, taken: false });
+        this.forage.push({ box, label, id, taken: false });
       }
     });
   }
 
   private spawnEnemies(): void {
     this.crawlerGroup = this.physics.add.group();
+    const area = AREAS[this.areaId];
 
-    for (let x = 24; x < END_X - 8; x += 16) {
-      const tile = this.randomTile(x - 4, x + 4);
-      if (tile) this.spawnEnemy('slime', tile.x, tile.y);
+    this.spawnScattered('slime', area.enemies.slime, 24, 12);
+    this.spawnScattered('moth', area.enemies.moth, 36, 9);
+    if (area.enemies.elder > 0) {
+      const tile = this.randomTile(END_X - 12, END_X - 4);
+      if (tile) this.spawnEnemy('elder', tile.x, tile.y);
     }
-    for (let x = 36; x < END_X - 12; x += 26) {
-      const tile = this.randomTile(x - 4, x + 4);
-      if (tile) this.spawnEnemy('moth', tile.x, tile.y);
+    if (area.boss) {
+      const tile = this.randomTile(END_X - 10, END_X - 4) ?? { x: END_X - 6, y: this.end.y };
+      this.spawnEnemy('boss', tile.x, tile.y, {
+        label: area.boss.label,
+        hp: area.boss.hp,
+        speed: 52,
+        radius: 58,
+      });
     }
-    const elderTile = this.randomTile(END_X - 12, END_X - 4);
-    if (elderTile) this.spawnEnemy('elder', elderTile.x, elderTile.y);
 
     this.physics.add.collider(this.crawlerGroup, this.obstacleGroup);
   }
 
-  private spawnEnemy(kind: EnemyKind, tx: number, ty: number): void {
+  private spawnScattered(kind: 'slime' | 'moth', count: number, from: number, spread: number): void {
+    for (let i = 0; i < count; i++) {
+      const centre = from + Math.round((i * (END_X - from - 12)) / Math.max(1, count - 1));
+      const tile = this.randomTile(centre - spread, centre + spread);
+      if (tile) this.spawnEnemy(kind, tile.x, tile.y);
+    }
+  }
+
+  private spawnEnemy(
+    kind: EnemyKind,
+    tx: number,
+    ty: number,
+    opts?: { label?: string; hp?: number; speed?: number; radius?: number },
+  ): void {
     const c = this.tileCenter(tx, ty);
-    const size = kind === 'elder' ? [72, 44] : kind === 'moth' ? [32, 24] : [44, 28];
-    const tint = kind === 'elder' ? C.mossDark : kind === 'moth' ? C.moon : C.mossMid;
-    const name = kind === 'elder' ? 'ELDER' : kind.toUpperCase();
+    const size = kind === 'boss' ? [110, 64] : kind === 'elder' ? [72, 44] : kind === 'moth' ? [32, 24] : [44, 28];
+    const tint = enemyColor(kind);
+    const name = opts?.label ?? (kind === 'elder' ? 'ELDER' : kind.toUpperCase());
     const actor = this.makeBox(c.x, c.y, size[0]!, size[1]!, tint, name);
-    actor.box.setDepth(c.y + 1);
+    actor.box.setDepth(c.y + (kind === 'boss' ? 3 : 1));
 
     if (kind === 'moth') actor.box.body.setAllowGravity(false);
     else {
@@ -406,13 +485,14 @@ export class WoodsScene extends Phaser.Scene {
       this.crawlerGroup.add(actor.box);
     }
 
-    const hp = kind === 'elder' ? 8 : kind === 'moth' ? 1 : 2;
+    const hp = opts?.hp ?? (kind === 'elder' ? 8 : kind === 'moth' ? 1 : 2);
     const enemy: Enemy = {
       ...actor,
       kind,
+      name,
       hp,
-      speed: kind === 'elder' ? 44 : kind === 'moth' ? 82 : 58,
-      radius: kind === 'elder' ? 44 : 22,
+      speed: opts?.speed ?? (kind === 'elder' ? 44 : kind === 'moth' ? 82 : 58),
+      radius: opts?.radius ?? (kind === 'elder' ? 44 : 22),
       nextHop: 0,
       wobble: Math.random() * Math.PI * 2,
       dead: false,
@@ -454,7 +534,9 @@ export class WoodsScene extends Phaser.Scene {
     this.hud = this.add.container(0, 0).setScrollFactor(0).setDepth(1000);
 
     this.hud.add(this.add.text(28, 20, 'THE WHISPERING WOODS', mono(10, C.cremaFaint)));
-    this.hud.add(this.add.text(28, 36, 'Night forage', display(24, C.crema, { fontStyle: '600' })));
+    this.hud.add(
+      this.add.text(28, 36, AREAS[this.areaId].name, display(24, C.crema, { fontStyle: '600' })),
+    );
 
     this.hpText = this.add.text(28, 70, '', mono(13, C.blood));
     this.hud.add(this.hpText);
@@ -510,7 +592,7 @@ export class WoodsScene extends Phaser.Scene {
     this.timerText.setText(clock(this.timeLeft));
     this.timerText.setColor(css(this.timeLeft <= 30 ? C.blood : C.crema));
     this.progress.set(this.progressValue());
-    this.distanceText.setText(`DEEP GROVE →  ${Math.round((1 - this.progressValue()) * 100)}% TO GO`);
+    this.distanceText.setText(`${AREAS[this.areaId].name.toUpperCase()} →  ${Math.round((1 - this.progressValue()) * 100)}% TO GO`);
 
     this.satchelText.setText(
       INGREDIENT_ORDER.map((id) => `${INGREDIENTS[id].name.split(' ')[0]!.toUpperCase()} ${this.stats.haul[id] ?? 0}`).join('  ·  '),
@@ -522,7 +604,12 @@ export class WoodsScene extends Phaser.Scene {
     const panel = this.add.graphics();
     inkPanel(panel, 700, 62, { fill: C.inkSoft, stroke: C.line, radius: 4, alpha: 0.9 });
     const text = this.add
-      .text(350, 31, 'Follow the trail east. Aim with the mouse; E at the lantern takes you home.', mono(12.5, C.crema))
+      .text(
+        350,
+        31,
+        'Follow the trail east to the map. Aim with the mouse; E at the lantern takes you home.',
+        mono(12.5, C.crema),
+      )
       .setOrigin(0.5);
     const box = this.add
       .container(GAME_WIDTH / 2 - 350, 148, [panel, text])
@@ -552,7 +639,7 @@ export class WoodsScene extends Phaser.Scene {
     this.input.keyboard?.on('keydown-ESC', () => this.togglePause());
     this.input.keyboard?.on('keydown-M', () => sfx.toggleMute());
     this.input.on('pointerdown', () => {
-      if (!this.paused && !this.over) this.attack();
+      if (!this.paused && !this.over && !this.mapOpen) this.attack();
     });
   }
 
@@ -565,7 +652,7 @@ export class WoodsScene extends Phaser.Scene {
   private drawReticle(): void {
     if (!this.reticle) return;
     this.reticle.clear();
-    if (this.over || this.paused) return;
+    if (this.over || this.paused || this.mapOpen) return;
     const p = this.input.activePointer;
     const w = this.cameras.main.getWorldPoint(p.x, p.y);
     this.reticle.lineStyle(1.5, C.gold, 0.85);
@@ -583,16 +670,25 @@ export class WoodsScene extends Phaser.Scene {
   update(time: number, delta: number): void {
     if (!this.player || this.over || this.paused) return;
 
+    this.timeLeft = Math.max(0, this.timeLeft - delta / 1000);
+    if (this.timeLeft <= 0) {
+      this.closeMap();
+      this.fallAsleep();
+      return;
+    }
+
+    if (this.mapOpen) {
+      this.updateTimerBlink(time);
+      this.updateHud();
+      return;
+    }
+
     if (!this.dying) {
-      this.timeLeft = Math.max(0, this.timeLeft - delta / 1000);
-      if (this.timeLeft <= 0) {
-        this.fallAsleep();
-      } else {
-        this.movePlayer(time);
-        this.updateEnemies(time);
-        this.advanceSwing(delta);
-        this.updateForage();
-      }
+      this.movePlayer(time);
+      this.updateEnemies(time);
+      this.advanceSwing(delta);
+      this.updateForage();
+      if (this.nearEnd()) this.reachEnd();
     }
 
     this.moveLabel(this.player);
@@ -603,12 +699,31 @@ export class WoodsScene extends Phaser.Scene {
     this.updateHint();
     this.updateHud();
 
-    if (this.timeLeft <= 30 && !this.over && Math.floor(time / 400) % 2 === 0) {
-      this.timerText.setAlpha(0.55);
-    } else {
-      this.timerText.setAlpha(1);
-    }
+    this.updateTimerBlink(time);
     if (!this.dying && this.hp <= 0) this.die();
+  }
+
+  private updateTimerBlink(time: number): void {
+    const blink = this.timeLeft <= 30 && !this.over && Math.floor(time / 400) % 2 === 0;
+    this.timerText.setAlpha(blink ? 0.55 : 1);
+  }
+
+  private nearEnd(): boolean {
+    return Phaser.Math.Distance.Between(this.player.box.x, this.player.box.y, this.end.x * TILE + TILE / 2, this.end.y * TILE + TILE / 2) < 90;
+  }
+
+  /** Walking to the far marker opens the map; a living boss blocks the way. */
+  private reachEnd(): void {
+    const boss = this.enemies.find((e) => e.kind === 'boss' && !e.dead);
+    if (boss) {
+      if (!this.lastHint.startsWith('BOSS')) {
+        this.lastHint = 'BOSS BLOCKS THE WAY';
+        this.hintText.setText(this.lastHint);
+      }
+      return;
+    }
+    this.completeArea();
+    this.openMap();
   }
 
   private movePlayer(time: number): void {
@@ -667,6 +782,7 @@ export class WoodsScene extends Phaser.Scene {
       if (Phaser.Math.Distance.Between(this.player.box.x, this.player.box.y, f.box.x, f.box.y) > 42) continue;
       f.taken = true;
       this.stats.haul[f.id] = (this.stats.haul[f.id] ?? 0) + 1;
+      this.noteResource(f.id);
       sfx.pickup();
       this.float(f.box.x, f.box.y - 24, `+1 ${INGREDIENTS[f.id].name}`, INGREDIENTS[f.id].color);
       f.box.destroy();
@@ -675,10 +791,12 @@ export class WoodsScene extends Phaser.Scene {
   }
 
   private updateHint(): void {
+    if (this.mapOpen) return;
     const nearHome = Phaser.Math.Distance.Between(this.player.box.x, this.player.box.y, this.trailhead.x, this.trailhead.y) < 120;
     let hint = '';
     if (this.dying) hint = '';
     else if (nearHome) hint = 'E — head home with the haul';
+    else if (this.nearEnd()) hint = AREAS[this.areaId].boss ? 'BOSS BLOCKS THE WAY' : 'MAP AHEAD — the trail opens';
     else if (this.timeLeft > RUN_SECONDS - 16) hint = 'WASD move  ·  CLICK to swing toward the mouse  ·  ESC pause';
     if (hint !== this.lastHint) {
       this.lastHint = hint;
@@ -691,7 +809,7 @@ export class WoodsScene extends Phaser.Scene {
   /* ------------------------------------------------------------------ */
 
   private attack(): void {
-    if (this.over || this.paused || this.dying) return;
+    if (this.over || this.paused || this.dying || this.mapOpen) return;
     const now = this.time.now;
     if (now < this.attackReadyAt) return;
     this.attackReadyAt = now + ATTACK_COOLDOWN;
@@ -796,13 +914,13 @@ export class WoodsScene extends Phaser.Scene {
     sfx.hit();
     e.box.setFillStyle(C.crema, 1);
     this.time.delayedCall(90, () => {
-      if (e.box.active) e.box.setFillStyle(e.kind === 'elder' ? C.mossDark : e.kind === 'moth' ? C.moon : C.mossMid, 0.92);
+      if (e.box.active) e.box.setFillStyle(enemyColor(e.kind), 0.92);
     });
 
     const away = Math.atan2(e.box.y - this.player.box.y, e.box.x - this.player.box.x);
-    const kb = e.kind === 'elder' ? 90 : 200;
+    const kb = e.kind === 'boss' ? 60 : e.kind === 'elder' ? 90 : 200;
     e.box.body.setVelocity(Math.cos(away) * kb, Math.sin(away) * kb);
-    e.label.setText(e.hp > 0 ? `${e.kind.toUpperCase()} ${e.hp}` : e.kind.toUpperCase());
+    e.label.setText(e.hp > 0 ? `${e.name} ${e.hp}` : e.name);
 
     if (e.hp > 0) return;
     e.dead = true;
@@ -828,6 +946,8 @@ export class WoodsScene extends Phaser.Scene {
         .setDepth(c.y + 2);
       this.forage.push({ box, label, id, taken: false });
     }
+
+    if (e.kind === 'boss') this.onBossDefeated(e.box.x, e.box.y);
 
     e.label.destroy();
     e.box.destroy();
@@ -862,6 +982,7 @@ export class WoodsScene extends Phaser.Scene {
     if (this.dying) return;
     this.dying = true;
     this.cause = 'sleep';
+    this.closeMap();
     this.clearSwing();
     this.player.box.body.setVelocity(0, 0);
     this.player.box.body.enable = false;
@@ -890,11 +1011,199 @@ export class WoodsScene extends Phaser.Scene {
   }
 
   /* ------------------------------------------------------------------ */
+  /* Map of the woods                                                     */
+  /* ------------------------------------------------------------------ */
+
+  private noteResource(id: IngredientId): void {
+    const seen = this.map.known[this.areaId] ?? new Set<IngredientId>();
+    seen.add(id);
+    this.map.known[this.areaId] = seen;
+  }
+
+  private completeArea(): void {
+    const area = AREAS[this.areaId];
+    if (this.map.explored.has(this.areaId)) return;
+    this.map.explored.add(this.areaId);
+    // Boss areas gate their rewards on the kill, not on simply walking in.
+    if (!area.boss) area.unlocksOnComplete.forEach((id) => this.map.unlocked.add(id));
+  }
+
+  private onBossDefeated(x: number, y: number): void {
+    const area = AREAS[this.areaId];
+    if (!area.boss || this.map.bossCleared.has(this.areaId)) return;
+    this.map.bossCleared.add(this.areaId);
+    area.boss.unlocks.forEach((id) => this.map.unlocked.add(id));
+    this.completeArea();
+    this.cameras.main.flash(180, 255, 238, 205);
+    this.float(x, y - 40, 'THE WAY OPENS', C.gold);
+    this.time.delayedCall(900, () => this.openMap());
+  }
+
+  private isAvailable(id: AreaId): boolean {
+    return (
+      this.map.unlocked.has(id) &&
+      !this.map.explored.has(id) &&
+      AREAS[id].requires.every((req) => this.map.explored.has(req))
+    );
+  }
+
+  private resourceSummary(id: AreaId): string {
+    const area = AREAS[id];
+    const seen = this.map.known[id] ?? new Set<IngredientId>();
+    const known = INGREDIENT_ORDER.filter((ingredient) => seen.has(ingredient) && area.resources[ingredient]);
+    const unknown = INGREDIENT_ORDER.some((ingredient) => area.resources[ingredient] && !seen.has(ingredient));
+    const parts = known.map((ingredient) => {
+      const frequency = FREQUENCY_TEXT[area.resources[ingredient]!];
+      const name = INGREDIENTS[ingredient].mapName;
+      return `${frequency} ${name}`;
+    });
+    if (parts.length === 0) return '??? · unexplored';
+    return unknown ? `${parts.join(' · ')} · and ???` : parts.join(' · ');
+  }
+
+  private openMap(): void {
+    if (this.mapOpen || this.over || this.dying) return;
+    this.completeArea();
+    this.mapOpen = true;
+    this.clearSwing();
+    this.player.box.body.setVelocity(0, 0);
+    this.enemies.forEach((e) => {
+      if (!e.dead && e.box.body) e.box.body.setVelocity(0, 0);
+    });
+    this.hintText.setText('');
+
+    const dim = this.add
+      .rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, C.ink, 0.86)
+      .setOrigin(0)
+      .setScrollFactor(0)
+      .setDepth(1300);
+    const panel = this.add.graphics();
+    inkPanel(panel, MAP_PANEL.w, MAP_PANEL.h, { fill: C.inkSoft, stroke: C.line, radius: 8 });
+    const title = this.add.text(34, 24, 'THE WOODS BEYOND', display(34, C.crema, { fontStyle: '600' }));
+    const sub = this.add.text(
+      36,
+      64,
+      `Choose deeper ground. The clock keeps ticking — ${clock(this.timeLeft)} left.`,
+      mono(11.5, C.cremaDim),
+    );
+    const legend = this.add.text(
+      MAP_PANEL.w - 36,
+      30,
+      'few · some · lots of   /   ??? = not yet found here',
+      mono(10, C.cremaFaint),
+    ).setOrigin(1, 0);
+    const rule = this.add.graphics();
+    divider(rule, 34, 94, MAP_PANEL.w - 34, C.line, 0.8);
+
+    const edges = this.add.graphics();
+    AREA_ORDER.forEach((id) => {
+      AREAS[id].links.forEach((other) => {
+        if (id >= other) return; // draw each edge once
+        const a = AREAS[id];
+        const b = AREAS[other];
+        const lit = this.map.explored.has(id) && this.map.explored.has(other);
+        const open = this.isAvailable(id) || this.isAvailable(other);
+        edges.lineStyle(lit ? 2 : 1, lit ? C.gold : open ? C.ember : C.line, lit ? 0.8 : open ? 0.5 : 0.18);
+        edges.lineBetween(
+          a.mapX + MAP_NODE.w / 2,
+          a.mapY + MAP_NODE.h / 2,
+          b.mapX + MAP_NODE.w / 2,
+          b.mapY + MAP_NODE.h / 2,
+        );
+      });
+    });
+
+    const nodes: Phaser.GameObjects.GameObject[] = [dim, panel, title, sub, legend, rule, edges];
+    AREA_ORDER.forEach((id) => {
+      const area = AREAS[id];
+      const x = area.mapX;
+      const y = area.mapY;
+      const explored = this.map.explored.has(id);
+      const available = this.isAvailable(id);
+      const bossCleared = this.map.bossCleared.has(id);
+      if (!explored && !available) {
+        const fog = this.add.graphics();
+        fog.fillStyle(C.ink, 0.92);
+        fog.fillRoundedRect(x, y, MAP_NODE.w, MAP_NODE.h, 4);
+        fog.lineStyle(1, C.line, 0.25);
+        fog.strokeRoundedRect(x + 0.5, y + 0.5, MAP_NODE.w - 1, MAP_NODE.h - 1, 4);
+        nodes.push(fog, this.add.text(x + MAP_NODE.w / 2, y + MAP_NODE.h / 2, '?', mono(20, C.cremaFaint)).setOrigin(0.5));
+        return;
+      }
+
+      const label = area.boss && !bossCleared ? `BOSS ${area.name}` : area.name;
+      const sublabel = explored
+        ? this.resourceSummary(id)
+        : available && area.requires.length > 0
+          ? 'locked by the path behind'
+          : '??? · never walked';
+      const button = new Button(this, {
+        x: MAP_PANEL.x + x,
+        y: MAP_PANEL.y + y,
+        w: MAP_NODE.w,
+        h: MAP_NODE.h,
+        label,
+        sublabel,
+        align: 'left',
+        variant: available ? 'primary' : 'ghost',
+        onClick: () => {
+          if (available) this.travelTo(id);
+        },
+      })
+        .setScrollFactor(0)
+        .setDepth(1302);
+      this.mapButtons.push(button);
+    });
+
+    const home = new Button(this, {
+      x: MAP_PANEL.x + MAP_PANEL.w - 236,
+      y: MAP_PANEL.y + MAP_PANEL.h - 58,
+      w: 200,
+      h: 42,
+      label: 'Home with the haul',
+      variant: 'quiet',
+      onClick: () => {
+        sfx.click();
+        sfx.dawn();
+        this.closeMap();
+        this.finishRun();
+      },
+    })
+      .setScrollFactor(0)
+      .setDepth(1302);
+    this.mapButtons.push(home);
+
+    this.mapOverlay = this.add.container(MAP_PANEL.x, MAP_PANEL.y, nodes).setScrollFactor(0).setDepth(1301);
+  }
+
+  private closeMap(): void {
+    this.mapOpen = false;
+    this.mapOverlay?.destroy(true);
+    this.mapOverlay = undefined;
+    this.mapButtons.forEach((button) => button.destroy());
+    this.mapButtons = [];
+  }
+
+  private travelTo(id: AreaId): void {
+    if (!this.isAvailable(id)) return;
+    sfx.click();
+    sfx.descend();
+    const carry: RunCarry = {
+      stats: this.stats,
+      timeLeft: this.timeLeft,
+      hp: this.hp,
+      maxHp: this.maxHp,
+    };
+    this.closeMap();
+    this.scene.restart({ area: id, run: carry, map: this.map });
+  }
+
+  /* ------------------------------------------------------------------ */
   /* Ending                                                               */
   /* ------------------------------------------------------------------ */
 
   private tryLeave(): void {
-    if (this.over || this.paused || this.dying) return;
+    if (this.over || this.paused || this.dying || this.mapOpen) return;
     const d = Phaser.Math.Distance.Between(this.player.box.x, this.player.box.y, this.trailhead.x, this.trailhead.y);
     if (d > 130) {
       this.float(this.player.box.x, this.player.box.y - 36, 'The trailhead is back the way you came.', C.cremaDim);
@@ -907,6 +1216,7 @@ export class WoodsScene extends Phaser.Scene {
   private finishRun(): void {
     if (this.over) return;
     this.over = true;
+    this.closeMap();
     this.clearSwing();
     this.physics.pause();
     this.player.box.body.setVelocity(0, 0);
@@ -1080,7 +1390,7 @@ export class WoodsScene extends Phaser.Scene {
   /* ------------------------------------------------------------------ */
 
   private togglePause(): void {
-    if (this.over || this.dying) return;
+    if (this.over || this.dying || this.mapOpen) return;
     if (this.paused) {
       this.resumeGame();
       return;

@@ -9,10 +9,11 @@ is limited by what you hauled home, and the upgrades you can afford come from
 what you sold.
 
 > **Status: playable night prototype.** The title screen, phase flow, art
-> pipeline, audio synthesis, economy data, save system and **the woods** are in
-> place and running. The day, dusk and dawn scenes are deliberate stubs waiting
-> for someone to implement them — see [docs/DESIGN.md](docs/DESIGN.md) for the
-> intended loop and the numbers worked out for that later work.
+> pipeline, audio synthesis, economy data, save system, **the woods** and the
+> **graph map of deeper areas** are in place and running. The day, dusk and dawn
+> scenes are deliberate stubs waiting for someone to implement them — see
+> [docs/DESIGN.md](docs/DESIGN.md) for the intended loop and the numbers worked
+> out for that later work.
 
 ## Run it
 
@@ -36,6 +37,7 @@ bundled via `@fontsource`.
 | **mouse** | aim; the reticle shows where the middle of the sweep will point |
 | **Space** or **click** | sweep a straight blade line across the mouse direction, not toward your movement |
 | **E** | head home, when standing by the trailhead lantern |
+| **click the map** | at the far end of a trail, pick the next area (or head home) |
 | **Esc** | pause (the sleep clock pauses too) / back to title on stub screens |
 | **M** | mute |
 
@@ -47,21 +49,31 @@ for dusk → Take the lantern**.
 
 In the woods:
 
-- Follow one long, linear trail from the trailhead to the Deep Grove. The HUD
-  shows a progress bar, distance remaining and `>> DEEPER` markers in the world;
-  there is no ambiguity about which way to go.
-- A **2:30 clock** ticks down the whole time. If it reaches zero the knight falls
-  asleep on the path, the run ends, and half the satchel is lost. Dying costs the
-  same half. The clock stops while paused.
-- Forage Wild beans, Moonmilk, Glowcaps, Emberberries and the rare Void bean in
-  bands along the trail. The satchel in the HUD counts what is currently on you.
-- Fight slimes, moths and a moss-backed elder slime. Slimes hop toward you when
-  they notice you; moths veer in erratically. The sword is a straight line that
-  sweeps from one side to the other over 240ms, with the middle of the sweep
-  aimed exactly where the mouse was when you clicked.
+- Each area is one long, linear trail from the trailhead to its far marker. The
+  HUD shows a progress bar, distance remaining and `>> DEEPER` markers in the
+  world, so the way forward is never ambiguous.
+- A **2:30 clock** ticks down the whole run and keeps ticking while the map is
+  open. If it reaches zero the knight falls asleep, the run ends, and half the
+  satchel is lost. Dying costs the same half. The clock stops only while paused.
+- Forage the current area's ingredients in bands along its trail — Wild beans,
+  Moonmilk, Glowcaps, Emberberries and Void beans are spread across the nine
+  areas. The satchel in the HUD counts what is currently on you.
+- Fight slimes, moths and a moss-backed elder slime; boss areas add a Warden or
+  the Lantern Moth at the far end. Slimes hop toward you, moths veer erratically.
+  The sword is a straight line that sweeps from one side to the other over 240ms,
+  with the middle of the sweep aimed exactly where the mouse was when you clicked.
 - Three **thermos slots** sit in the HUD. They are visible empty stubs for now;
   the day/dusk shift will fill them with drinks made and equipped before the run.
-- Return to the trailhead lantern and press **E** to bank the full haul.
+- **Travel deeper:** walking to the far marker opens a map of the woods. Unvisited
+  areas are fogged; available next areas are highlighted. Explored areas list the
+  resources you have actually picked up there with their frequency (`some beans ·
+  and ???`), and undiscovered resources stay hidden as `???`. The two opening
+  trails loop into the Old Bridge boss, whose defeat unlocks the Ember Fork and
+  its hotter loot; later bosses open the Void Gate and Dawn Below. Choosing an
+  area continues the same run — satchel, health and clock carry over. Map
+  knowledge resets every night.
+- Return to a trailhead lantern and press **E**, or use **Home with the haul** on
+  the map, to bank the full haul.
 
 Actors are deliberately plain coloured hitboxes with text labels while the art
 direction for this phase is being settled. The world, HUD and summary screens
@@ -95,6 +107,7 @@ src/
     palette.ts             the whole game's colour + type tokens
     state.ts               meta save/load, pantry, shift/delve reports
     data/economy.ts        ingredients, drinks, upgrades, loot tables, pacing
+    data/areas.ts          the nine-area graph: links, loot, enemies, boss gates
     art/
       draw.ts              arch / wood / colour helpers
       textures.ts          every sprite, tile and atmosphere texture
@@ -106,7 +119,7 @@ src/
       PhaseStub.ts         shared shell for the unbuilt phase screens
       ShopScene.ts         DAY   — stub
       DuskScene.ts         DUSK  — stub
-      WoodsScene.ts        NIGHT — linear trail, timer, forage + combat
+      WoodsScene.ts        NIGHT — per-area trail, timer, forage, combat, map
       LedgerScene.ts       DAWN  — stub
 ```
 
@@ -123,6 +136,7 @@ the counter and a cup in the foreground.
 
 - [x] Scaffold: run/build, palette, type, procedural art, audio, save state
 - [x] Woods prototype: movement, foraging, combat, exit, summary
+- [x] Woods map: nine-area graph, fog, resource summaries, boss gates, travel
 - [ ] Day shift: customers, orders, pour gauge, patience, takings
 - [ ] Dusk ledger: upgrades and trail selection
 - [ ] Dawn ledger: results, restock, next day

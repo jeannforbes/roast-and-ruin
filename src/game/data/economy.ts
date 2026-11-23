@@ -9,17 +9,19 @@ export type IngredientId = 'bean' | 'milk' | 'mushroom' | 'ember' | 'void';
 export interface Ingredient {
   id: IngredientId;
   name: string;
+  /** Plural form used on the woods map ("lots of glowcaps"). */
+  mapName: string;
   /** Where it comes from, shown in the ledger. */
   source: string;
   color: number;
 }
 
 export const INGREDIENTS: Record<IngredientId, Ingredient> = {
-  bean: { id: 'bean', name: 'Wild bean', source: 'bean groves', color: C.roast },
-  milk: { id: 'milk', name: 'Moonmilk', source: 'moonmilk rings', color: C.steam },
-  mushroom: { id: 'mushroom', name: 'Glowcap', source: 'glowcap circles', color: C.moon },
-  ember: { id: 'ember', name: 'Emberberry', source: 'emberberry thickets', color: C.ember },
-  void: { id: 'void', name: 'Void bean', source: 'the deepest grove', color: C.plum },
+  bean: { id: 'bean', name: 'Wild bean', mapName: 'beans', source: 'bean groves', color: C.roast },
+  milk: { id: 'milk', name: 'Moonmilk', mapName: 'moonmilk', source: 'moonmilk rings', color: C.steam },
+  mushroom: { id: 'mushroom', name: 'Glowcap', mapName: 'glowcaps', source: 'glowcap circles', color: C.moon },
+  ember: { id: 'ember', name: 'Emberberry', mapName: 'emberberries', source: 'emberberry thickets', color: C.ember },
+  void: { id: 'void', name: 'Void bean', mapName: 'void beans', source: 'the deepest grove', color: C.plum },
 };
 
 export const INGREDIENT_ORDER: IngredientId[] = ['bean', 'milk', 'mushroom', 'ember', 'void'];
